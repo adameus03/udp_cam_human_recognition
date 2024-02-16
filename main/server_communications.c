@@ -29,14 +29,15 @@ esp_err_t begin_udp_stream() {
         return ESP_FAIL;
     }
 
-    // Set 2 second timeout for sending data
+    // Set 100ms timeout for sending data
     struct timeval tx_timeout;
-    tx_timeout.tv_sec = 1;
-    tx_timeout.tv_usec = 0;
+    tx_timeout.tv_sec = 0;
+    tx_timeout.tv_usec = 100000;
 
     struct timeval rx_timeout;
-    rx_timeout.tv_sec = /*10*/1;
-    rx_timeout.tv_usec = 0;
+    rx_timeout.tv_sec = 0;
+    rx_timeout.tv_usec = 100000;
+
     setsockopt (sock, SOL_SOCKET, SO_SNDTIMEO, &tx_timeout, sizeof tx_timeout);
     setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &rx_timeout, sizeof rx_timeout);
 
@@ -60,6 +61,9 @@ void end_udp_stream() {
     x_on_udp_transmission_end();
 }
 
+#define MAX_UDP_DATA_SIZE /*32768*/ 16384
+#define CHUNK_DELAY_MS 100
+
 esp_err_t transmit_udp(uint8_t* data, size_t len) {
     ESP_LOGI(TAG, "Sending decoy signal");
     int err = sendto(sock, NULL, 0, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
@@ -73,14 +77,14 @@ esp_err_t transmit_udp(uint8_t* data, size_t len) {
         ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
         return ESP_FAIL;
     }
-    size_t blk_size = 32768;//
+    size_t blk_size = MAX_UDP_DATA_SIZE;//
     size_t num_blks = len / blk_size;
     size_t rem = len % blk_size;
     ESP_LOGI(TAG, "Server responded, starting jpeg transmission (%d = %d x %d + %d)", len, num_blks, blk_size, rem);
     uint16_t err_count = 0;
     for (size_t i = 0; i < num_blks; i++) {
         int err = sendto(sock, data + i * blk_size, blk_size, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-        vTaskDelay(10 / portTICK_PERIOD_MS);
+        vTaskDelay(CHUNK_DELAY_MS / portTICK_PERIOD_MS);
         if (err < 0) {
             err_count++;
         }

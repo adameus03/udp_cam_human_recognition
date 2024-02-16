@@ -6,6 +6,12 @@ import matplotlib.pyplot as plt
 
 UDP_IP = "0.0.0.0"
 UDP_PORT = 3333
+#MAX_UDP_DATA_SIZE = 32768
+#MAX_UDP_DATA_SIZE = 1480
+MAX_UDP_DATA_SIZE = 16384
+SHOW_IMAGE = True
+MAX_AWAITING_JPEGS = 1
+IMAGE_RENDER_DELAY_MS = 10
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)#
 sock.bind((UDP_IP, UDP_PORT))
@@ -36,7 +42,7 @@ def image_update(s):
             axesImage = plt.imshow(frame, aspect='auto')
             axesImageSet = True
             plt.show()
-            plt.pause(10)
+            plt.pause(IMAGE_RENDER_DELAY_MS / 1000.0)
             
         else:
             axesImage.set_data(frame)
@@ -58,10 +64,10 @@ def listen_udp():
             sock.sendto(b'', addr)
         else:
             print('waiting for decoy packet')
-            data, addr = sock.recvfrom(32678)
+            data, addr = sock.recvfrom(MAX_UDP_DATA_SIZE)
             while len(data) != 0:
                 print('not a decoy packet')
-                data, addr = sock.recvfrom(32678)
+                data, addr = sock.recvfrom(MAX_UDP_DATA_SIZE)
             
             sock.sendto(b'', addr)
             print('decoy packet received, sent confirmation back to client')
@@ -69,18 +75,18 @@ def listen_udp():
         s = b''
         nblks = 0
         while True:
-            data, addr = sock.recvfrom(32768)
+            data, addr = sock.recvfrom(MAX_UDP_DATA_SIZE)
             s += data
             nblks += 1
             if len(data) == 0:
                 num_next_jpegs_awaiting += 1
                 print("Num next jpegs awaiting: ", num_next_jpegs_awaiting)
-                if (num_next_jpegs_awaiting > 2):
+                if (num_next_jpegs_awaiting > MAX_AWAITING_JPEGS):
                     print("skipping to newest jpeg")
                     num_next_jpegs_awaiting = 0
                     skipping = True
                     break
-            elif len(data) < 32768:
+            elif len(data) < MAX_UDP_DATA_SIZE:
                 print('received', nblks, 'blocks')
                 break
             elif s.rfind(b'\xff\xd9') != -1:
@@ -98,8 +104,9 @@ def listen_udp():
             #    continue
             if num_next_jpegs_awaiting > 0:
                 num_next_jpegs_awaiting -= 1
-            #if check_jpeg(s, data):
-            #    image_update(s)
+            if SHOW_IMAGE:
+                if check_jpeg(s, data):
+                    image_update(s)
         else:
             skipping = False
         
