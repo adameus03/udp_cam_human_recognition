@@ -6,6 +6,7 @@ from queue import PriorityQueue, SimpleQueue
 import threading
 from dataclasses import dataclass, field
 from typing import Any
+import os
 
 
 UDP_IP = "0.0.0.0"
@@ -66,14 +67,14 @@ class Visualizer:
         frame = cv2.imdecode(np.frombuffer(jfif_data, dtype=np.uint8), cv2.IMREAD_COLOR)
         #print(type(frame))
         #cv2.imwrite('frame_CENTRAL.jpg', frame)
-        cv2.imwrite('live_frame.jpg', frame)
+        #cv2.imwrite('live_frame.jpg', frame)
         """
         //https://stackoverflow.com/questions/66166929/send-jpeg-images-motion-jpeg-through-rtsp-gstreamer
         https://superuser.com/questions/1463858/streaming-jpg-stream-over-rtp-with-gstreamer-or-avconv  
 
         gst-launch-1.0 multifilesrc location="live_frame.jpg" loop=true start-index=0 stop-index=0  ! image/jpeg,width=640,height=512,type=video,framerate=30/1 ! identity ! jpegdec ! videoscale ! videoconvert ! x264enc ! h264parse ! mpegtsmux ! rtpmp2tpay ! udpsink host=127.0.0.1 port=5000
         """
-        return
+        #return
         try:
             if not self.axesImageSet:
                 plt.ion()
@@ -89,6 +90,19 @@ class Visualizer:
                 plt.pause(self.IMAGE_RENDER_DELAY_MS / 1000.0) # pause a bit so that plots are updated
         except Exception as e:
             print(e)
+
+
+def named_pipe_send(pname="/tmp/f8a22310975600b1", data=b''):
+    print("[Visualizer] START NAMED_PIPE_SEND")
+    if data == b'':
+        print("[Visualizer] Not sending empty data")
+        return
+    if not os.path.exists(pname):
+        os.mkfifo(pname)
+    with open(pname, 'wb') as f:
+        f.write(data)
+
+    print("[Visualizer] END NAMED_PIPE_SEND")
 
 #If the reassembler fills the queue faster than the visualizer can consume it, the reassembler could block until the visualizer consumes some of the queue.
 #But we don't want that, because the reassembler should be able to keep up with the incoming data.
@@ -109,8 +123,16 @@ def run_visualizer():
             #print(type(jfif_data))
             
             #print("Before image_update")
-            print("[Visualizer] numQueued=" + str(jfif_queue.qsize()))#"qsize is not reliable"
+            numQueued = jfif_queue.qsize()
+            print("[Visualizer] numQueued=" + str(numQueued))#"qsize is not reliable"
+            if numQueued > 1:
+                numJfifsToDrop = numQueued - 1
+                print("[Visualizer] Dropping " + str(numJfifsToDrop) + " JFIFs")
+                for i in range(numJfifsToDrop):
+                    jfif_queue.get(block=False)
+                    
             visualizer.image_update(jfif_data)
+            #named_pipe_send(data=jfif_data)
             #print("After image_update")
         else:
             print("[Visualizer] basic_jfif_check FAIL")
@@ -238,7 +260,7 @@ def listen_udp():
 
 
 listener_thread = threading.Thread(target=listen_udp)
-reassembler_thread = threading.Thread(target=run_reassembler, args=(5,))
+reassembler_thread = threading.Thread(target=run_reassembler, args=(10,))
 #visualizer_thread = threading.Thread(target=run_visualizer)
 
 #visualizer_thread.start()
