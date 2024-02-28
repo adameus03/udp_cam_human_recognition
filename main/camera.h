@@ -38,4 +38,4 @@ esp_err_t camera_set_quality(int jpeg_quality);
  * @note This function is called from the camera capture function
  * @note This function should be implemented by the user
 */
-extern void x_camera_process_image(int width, int height, int format, uint8_t * data, size_t len);
+extern void x_camera_process_image(int width, int height, int format, uint8_t** ppuDataBufAddr, size_t len);

@@ -50,7 +50,7 @@ static camera_config_t camera_config = {
 
     .pixel_format = PIXFORMAT_JPEG,//YUV422,GRAYSCALE,RGB565,JPEG
     //.frame_size = FRAMESIZE_UXGA,//QQVGA-UXGA, For ESP32, do not use sizes above QVGA when not JPEG. The performance of the ESP32-S series has improved a lot, but JPEG mode always gives better frame rates.
-    .frame_size = FRAMESIZE_SXGA,
+    .frame_size = /*FRAMESIZE_SXGA*/FRAMESIZE_UXGA,
 
     .jpeg_quality = 12, //0-63, for OV series camera sensors, lower number means higher quality
     .fb_count = 1, //When jpeg mode is used, if fb_count more than one, the driver will work in continuous mode.
@@ -85,7 +85,7 @@ esp_err_t camera_capture(){
     ESP_LOGD(TAG, "Got frame of size %zu", fb->len);
 
     //Process the frame using the user's function
-    x_camera_process_image(fb->width, fb->height, fb->format, fb->buf, fb->len);
+    x_camera_process_image(fb->width, fb->height, fb->format, &fb->buf, fb->len);
   
     //return the frame buffer back to the driver for reuse
     esp_camera_fb_return(fb);

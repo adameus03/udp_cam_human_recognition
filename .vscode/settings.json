@@ -17,7 +17,8 @@
     "files.associations": {
         "netdb.h": "c",
         "task.h": "c",
-        "wifi_connect.h": "c"
+        "wifi_connect.h": "c",
+        "thread": "c"
     },
     "idf.flashType": "UART"
 }

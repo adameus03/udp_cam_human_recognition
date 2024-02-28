@@ -14,7 +14,6 @@ void app_main(void)
     // Disable the watchdog timer
     rtc_wdt_protect_off();
     rtc_wdt_disable();
-    //rtc_wd
 
     ESP_LOGI(TAG, "Starting main");
     ESP_ERROR_CHECK(nvs_flash_init());
@@ -24,6 +23,5 @@ void app_main(void)
     //vTaskPrioritySet(NULL, 5);//set the priority of the main task to 5 ? 
     ESP_ERROR_CHECK(wifi_connect());
     camau_controller_init();
-    //CAMAU is mainly executed on core 1
-    camau_controller_run();
+    camau_controller_run(); //CAMAU is mainly executed on core 1
 }

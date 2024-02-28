@@ -13,13 +13,14 @@ void camau_controller_init(void) {
 void camau_controller_run(void) {
     ESP_LOGI(TAG, "Running camau controller");
     //begin_udp_stream();//
-    analyser_run();
+    analyser_run((MAX_UDP_DATA_SIZE<<1) + 1024);
 }
 
-void x_analyser_perform_action(int width, int height, int format, uint8_t * data, size_t len) {
+void x_analyser_perform_action(int width, int height, int format, uint8_t** ppuDataBuf, size_t len) {
     ESP_LOGI(TAG, "Performing action");
     begin_udp_stream();
-    transmit_udp(data, len);
+    //transmit_udp(*ppuDataBufAddr, len);
+    transmit_jfif(ppuDataBuf, len);
     end_udp_stream();
 }
 

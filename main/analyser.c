@@ -20,12 +20,12 @@ void __analyser_task(void *pvParameters) {
     }
 }
 
-void analyser_run() {
+void analyser_run(uint32_t usStackDepth) {
     ESP_LOGI(TAG, "Running analyser");
     camera_init(FRAMESIZE_UXGA, 12);
     // Create the analyser task on core 1
     
-    xTaskCreatePinnedToCore(__analyser_task, "analyser_task", 4096, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(__analyser_task, "analyser_task", usStackDepth, NULL, 5, NULL, 1);
 }
 
 
@@ -34,11 +34,11 @@ unsigned char analyser_in_excitement = 0;
 /**
  * @brief This function is called when a camera frame is captured
 */
-void x_camera_process_image(int width, int height, int format, uint8_t * data, size_t len) {
+void x_camera_process_image(int width, int height, int format, uint8_t** ppuDataBufAddr, size_t len) {
     ESP_LOGD(TAG, "Testing index: %d", testing_index);
     if (analyser_in_excitement) {
         ESP_LOGI(TAG, "In excitement, skipping image processing");
-        x_analyser_perform_action(width, height, format, data, len);
+        x_analyser_perform_action(width, height, format, ppuDataBufAddr, len);
         if (testing_index == 1/*9*/) {
             testing_index = 0;
             analyser_in_excitement = 0;
@@ -50,7 +50,7 @@ void x_camera_process_image(int width, int height, int format, uint8_t * data, s
             ESP_LOGD(TAG, "Action triggered");
             testing_index = 0;
             analyser_in_excitement = 1;
-            x_analyser_perform_action(width, height, format, data, len);
+            x_analyser_perform_action(width, height, format, ppuDataBufAddr, len);
         }
     }
     testing_index++;
