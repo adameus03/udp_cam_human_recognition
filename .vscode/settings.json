@@ -26,7 +26,8 @@
         "nimble_port.h": "c",
         "ble_hs.h": "c",
         "ble_svc_gap.h": "c",
-        "ble_svc_gatt.h": "c"
+        "ble_svc_gatt.h": "c",
+        "rtc_wdt.h": "c"
     },
     "idf.flashType": "UART"
 }
