@@ -19,18 +19,25 @@
 
 static const char* TAG = "registration";
 
+#define NETWORK_STATE_WIFI_DISCONNECTED 0U
+#define NETWORK_STATE_WIFI_CONNECTED 1U
+
+int test_value = 0;
 struct __sau_gatt_chr_vals {
     char wifi_ssid[MAX_WIFI_SSID_LENGTH];
     char wifi_psk[MAX_WIFI_PSK_LENGTH];
     char user_id[MAX_USER_ID_LENGTH]; 
+    uint8_t network_state;
 } sau_gatt_registration_service_chr_values;
 
 static uint8_t sau_ble_hs_id_addr_type;
+static uint16_t conn_handle = 0U;
 
 struct __sau_gatt_registration_service_chr_handles {
     uint16_t wifi_ssid_characteristic_handle;
     uint16_t wifi_psk_characteristic_handle;
     uint16_t user_id_characteristic_handle;
+    uint16_t network_state_characteristic_handle;
 } sau_gatt_registration_service_chr_handles;
 
 static void sau_registration_ble_advertise();
@@ -60,6 +67,7 @@ int on_gatt_wifi_ssid_charatecteristic_access(uint16_t conn_handle, uint16_t att
     ESP_LOGI(TAG, "In GATT wifi_ssid characteristic access callback stub");
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
         uint16_t rx_len = 0;
+        ESP_LOGI(TAG, "PREVIOUS provided wifi_ssid = {%s}", sau_gatt_registration_service_chr_values.wifi_ssid); //
         int err =  gatt_svr_chr_write(ctxt->om, MIN_WIFI_SSID_LENGTH, MAX_WIFI_SSID_LENGTH, sau_gatt_registration_service_chr_values.wifi_ssid, &rx_len);
         if (err == 0) {
             ESP_LOGI(TAG, "Successfully written characteristic value");
@@ -80,7 +88,7 @@ int on_gatt_wifi_psk_charatecteristic_access(uint16_t conn_handle, uint16_t attr
         int err = gatt_svr_chr_write(ctxt->om, MIN_WIFI_PSK_LENGTH, MAX_WIFI_PSK_LENGTH, sau_gatt_registration_service_chr_values.wifi_psk, &rx_len);
         if (err == 0) {
             ESP_LOGI(TAG, "Successfully written characteristic value");
-            memset(sau_gatt_registration_service_chr_values.wifi_psk + rx_len, 0, MAX_WIFI_SSID_LENGTH - rx_len);
+            memset(sau_gatt_registration_service_chr_values.wifi_psk + rx_len, 0, MAX_WIFI_PSK_LENGTH - rx_len);
             ESP_LOGI(TAG, "Provided wifi_psk = {%s}", sau_gatt_registration_service_chr_values.wifi_psk);
         } else {
             ESP_LOGE(TAG, "Failed to write characteristic value");
@@ -97,14 +105,34 @@ int on_gatt_user_id_charatecteristic_access(uint16_t conn_handle, uint16_t attr_
         int err = gatt_svr_chr_write(ctxt->om, MIN_USER_ID_LENGTH, MAX_USER_ID_LENGTH, sau_gatt_registration_service_chr_values.user_id, &rx_len);
         if (err == 0) {
             ESP_LOGI(TAG, "Successfully written characteristic value");
-            memset(sau_gatt_registration_service_chr_values.user_id + rx_len, 0, MAX_WIFI_SSID_LENGTH - rx_len);
+            memset(sau_gatt_registration_service_chr_values.user_id + rx_len, 0, MAX_USER_ID_LENGTH - rx_len);
             ESP_LOGI(TAG, "Provided user_id = {%s}", sau_gatt_registration_service_chr_values.user_id);
+
+            ///
+            struct os_mbuf *om = ble_hs_mbuf_from_flat(&sau_gatt_registration_service_chr_values.network_state, 1U);
+            
+            if (om == NULL) {
+                ESP_LOGE(TAG, "Failed to allocate mbuf for GATT notification.");
+            } else {
+                if (0 != ble_gatts_notify_custom(conn_handle, sau_gatt_registration_service_chr_handles.network_state_characteristic_handle, om)) {
+                    ESP_LOGE(TAG, "Failed to notify BLE central.");
+                } else {
+                    ESP_LOGI(TAG, "Sent GATT notification to BLE central.");
+                    sau_gatt_registration_service_chr_values.network_state = !sau_gatt_registration_service_chr_values.network_state;
+                }
+            }
+            ///
         } else {
             ESP_LOGE(TAG, "Failed to write characteristic value");
         }
         return err;
     }
     else return BLE_ATT_OP_ERROR_RSP;
+}
+
+int on_gatt_network_state_characteristic_access(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    ESP_LOGI(TAG, "In GATT network_state characteristic access callback stub");
+    return 0;
 }
 
 
@@ -142,6 +170,12 @@ static const struct ble_gatt_svc_def gatt_server_services[] = {
                 .flags = BLE_GATT_CHR_F_WRITE, //WRITE_ENC??
                 //.min_key_size = 0U,
                 .val_handle = &sau_gatt_registration_service_chr_handles.user_id_characteristic_handle
+            },
+            {
+                .uuid = /*SAU_GATT_REGISTRATION_SERVICE_NETWORK_STATE_CHARACTERISTIC_UUID*/BLE_UUID128_DECLARE(0xc7, 0x2a, 0x4c, 0x9c, 0xd9, 0x3e, 0x41, 0x41, 0xa9, 0x68, 0xd8, 0x86, 0x3f, 0x6b, 0x0a, 0xdd),
+                .access_cb = on_gatt_network_state_characteristic_access,
+                .flags = BLE_GATT_CHR_F_NOTIFY,
+                .val_handle = &sau_gatt_registration_service_chr_handles.network_state_characteristic_handle
             },
             {
                 0, /* VERY IMPORTANT!!! - it denotes the end of characteristics*/
@@ -183,7 +217,8 @@ int ble_gap_event_handler(struct ble_gap_event *event, void *arg) {
         case BLE_GAP_EVENT_CONNECT:
             ESP_LOGI(TAG, "Event --- BLE_GAP_EVENT_CONNECT");
             if (event->connect.status == 0) {
-                ESP_LOGI(TAG, "It's a successful connection");   
+                ESP_LOGI(TAG, "It's a successful connection");
+                conn_handle = event->connect.conn_handle;
             } else {
                 ESP_LOGI(TAG, "It's a failed connection");
                 sau_registration_ble_advertise();
@@ -203,7 +238,7 @@ int ble_gap_event_handler(struct ble_gap_event *event, void *arg) {
             ESP_LOGI(TAG, "Event --- BLE_GAP_EVENT_MTU");
             break;
         default:
-            ESP_LOGI(TAG, "Event --- [Other Event]");
+            ESP_LOGI(TAG, "Event --- [Other Event (%u)]", event->type);
             break;
     }
     return 0;
@@ -287,6 +322,10 @@ void on_ble_hs_reset_stub(int reason) {
 */
 int test_start() {
     //esp_nimble_hci_init();
+    //sau_gatt_registration_service_chr_handles.network_state_characteristic_handle = NETWORK_STATE_WIFI_DISCONNECTED;
+    //memset(sau_gatt_registration_service_chr_values.wifi_ssid, 0, MAX_WIFI_SSID_LENGTH);
+    //memset(sau_gatt_registration_service_chr_values.wifi_psk, 0, MAX_WIFI_PSK_LENGTH);
+    //memset(sau_gatt_registration_service_chr_values.user_id, 0, MAX_USER_ID_LENGTH);
 
     int err = 0;
 
