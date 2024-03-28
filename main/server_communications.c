@@ -13,7 +13,7 @@
 //#pragma pack(1) // Force compiler to pack struct members together
 
 static const char * TAG = "server_communications";
-#define HOST_IP_ADDR /*"192.168.1.15"*/"192.168.173.32"
+#define HOST_IP_ADDR /*"192.168.1.15"*//*"192.168.173.32"*/"192.168.116.32"
 #define PORT 3333
 
 char host_ip[] = HOST_IP_ADDR;
