@@ -1,11 +1,11 @@
 #include <stdio.h>
 #include "esp_log.h"
 #include "nvs_flash.h"
-//#include "esp_netif.h"
+#include "esp_netif.h" // ENABLE THIS
 #include "esp_event.h"
 #include "rtc_wdt.h"
-//#include "wifi_connect.h"
-//#include "camau_controller.h"
+#include "wifi_connect.h" // ENABLE THIS
+#include "camau_controller.h" // ENABLE THIS
 
 #include "registration.h"
 
@@ -26,16 +26,16 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
-    //////ESP_ERROR_CHECK(esp_netif_init()); //??? Ble conflict ???
+    //ESP_ERROR_CHECK(esp_netif_init()); //??? Ble conflict ??? ///!!!!! DISABLE THIS
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     
     //vTaskPrioritySet(NULL, 5);//set the priority of the main task to 5 ? 
     
-    test_start();
-    return;
+    //test_start();
+    //return;
 
-    //////ESP_ERROR_CHECK(wifi_connect());
-    //////camau_controller_init();
-    //////camau_controller_run(); //CAMAU is mainly executed on core 1
+    ESP_ERROR_CHECK(wifi_connect());
+    camau_controller_init();
+    camau_controller_run(); //CAMAU is mainly executed on core 1
     //////return;
 }

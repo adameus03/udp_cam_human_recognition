@@ -19,14 +19,11 @@
 
 static const char* TAG = "registration";
 
-#define NETWORK_STATE_WIFI_DISCONNECTED 0U
-#define NETWORK_STATE_WIFI_CONNECTED 1U
-
 int test_value = 0;
 struct __sau_gatt_chr_vals {
-    char wifi_ssid[MAX_WIFI_SSID_LENGTH];
-    char wifi_psk[MAX_WIFI_PSK_LENGTH];
-    char user_id[MAX_USER_ID_LENGTH]; 
+    char wifi_ssid[MAX_WIFI_SSID_LENGTH+1];
+    char wifi_psk[MAX_WIFI_PSK_LENGTH+1];
+    char user_id[MAX_USER_ID_LENGTH+1]; 
     uint8_t network_state;
 } sau_gatt_registration_service_chr_values;
 

@@ -53,10 +53,18 @@ static const ble_uuid_t* SAU_GATT_REGISTRATION_SERVICE_USER_ID_CHARACTERISTIC_UU
 );*/
 
 typedef enum {
-    DEVICE_UNREGISTERED,
-    DEVICE_REGISTERED
+    DEVICE_UNREGISTERED = 0U,
+    DEVICE_REGISTERED = 1U
 } registration_status_t;
 
+typedef enum {
+    NETWORK_STATE_WIFI_DISCONNECTED = 0U,
+    NETWORK_STATE_WIFI_CONNECTED = 1U
+} registration_network_state_t;
+
 int test_start();
+
+registration_status_t registration_check_device_registered();
+registration_network_state_t registration_check_wifi_credentials_and_connect(const char* ssid, const char* psk);
 
 #endif
