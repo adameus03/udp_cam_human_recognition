@@ -26,16 +26,22 @@ void app_main(void)
     }
         ESP_ERROR_CHECK(err);
 
-    ESP_ERROR_CHECK(esp_netif_init()); //??? Ble conflict ??? ///!!!!! DISABLE THIS
+    //ESP_ERROR_CHECK(esp_netif_init()); //??? Ble conflict ??? ///!!!!! DISABLE THIS
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     
     //vTaskPrioritySet(NULL, 5);//set the priority of the main task to 5 ? 
     
-    //test_start();
-    //return;
+    ////////////////test_start();
+    err = registration_main();
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "registration_main exited with success.");
+    } else {
+        ESP_LOGE(TAG, "registration_main exited with fail.");
+    }
+    return;
 
-    ESP_ERROR_CHECK(wifi_connect());
-    camau_controller_init();
-    camau_controller_run(); //CAMAU is mainly executed on core 1
+    //////ESP_ERROR_CHECK(wifi_connect());
+    //////camau_controller_init();
+    //////camau_controller_run(); //CAMAU is mainly executed on core 1
     //////return;
 }

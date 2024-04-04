@@ -52,9 +52,19 @@ static const ble_uuid_t* SAU_GATT_REGISTRATION_SERVICE_USER_ID_CHARACTERISTIC_UU
     0xfc, 0x20, 0xcd, 0xdd, 0x14, 0x9c, 0x47, 0xa4, 0xa5, 0x55, 0x4f, 0xbe, 0x35, 0x04, 0xb4, 0xb8\
 );*/
 
+#define MIN_WIFI_SSID_LENGTH 1
+#define MAX_WIFI_SSID_LENGTH 20
+#define MIN_WIFI_PSK_LENGTH 1
+#define MAX_WIFI_PSK_LENGTH 40
+#define MIN_USER_ID_LENGTH 16
+#define MAX_USER_ID_LENGTH 16
+
+#define CKEY_LENGTH 16
+
 typedef enum {
     DEVICE_UNREGISTERED = 0U,
-    DEVICE_REGISTERED = 1U
+    DEVICE_REGISTERED = 1U,
+    DEVICE_REGISTRATION_STATUS_UNKNOWN = 2U
 } registration_status_t;
 
 typedef enum {
@@ -62,9 +72,18 @@ typedef enum {
     NETWORK_STATE_WIFI_CONNECTED = 1U
 } registration_network_state_t;
 
+typedef struct {
+    struct __sau_gatt_chr_vals* pCharacteristics; 
+    uint32_t cam_id;
+    char ckey[CKEY_LENGTH+1];
+} registration_data_t;
+
 int test_start();
 
-registration_status_t registration_check_device_registered();
+void registration_init(registration_data_t* out_pRegistrationData);
+registration_status_t registration_check_device_registered(registration_data_t* out_pRegistrationData);
 registration_network_state_t registration_check_wifi_credentials_and_connect(const char* ssid, const char* psk);
+
+esp_err_t registration_main();
 
 #endif

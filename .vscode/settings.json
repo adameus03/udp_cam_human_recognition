@@ -28,7 +28,11 @@
         "ble_svc_gap.h": "c",
         "ble_svc_gatt.h": "c",
         "rtc_wdt.h": "c",
-        "camau_controller.h": "c"
+        "camau_controller.h": "c",
+        "stdatomic.h": "c",
+        "esp_vfs_fat.h": "c",
+        "diskio_impl.h": "c",
+        "diskio.h": "c"
     },
     "idf.flashType": "UART"
 }

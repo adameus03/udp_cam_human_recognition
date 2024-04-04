@@ -6,26 +6,15 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 
+#include "nvs_flash.h" //
+
 //#include "nimble"
 #include "esp_log.h"
 #include "registration.h"
 
-#define MIN_WIFI_SSID_LENGTH 1
-#define MAX_WIFI_SSID_LENGTH 20
-#define MIN_WIFI_PSK_LENGTH 1
-#define MAX_WIFI_PSK_LENGTH 40
-#define MIN_USER_ID_LENGTH 16
-#define MAX_USER_ID_LENGTH 16
-
 static const char* TAG = "registration";
 
 int test_value = 0;
-struct __sau_gatt_chr_vals {
-    char wifi_ssid[MAX_WIFI_SSID_LENGTH+1];
-    char wifi_psk[MAX_WIFI_PSK_LENGTH+1];
-    char user_id[MAX_USER_ID_LENGTH+1]; 
-    uint8_t network_state;
-} sau_gatt_registration_service_chr_values;
 
 static uint8_t sau_ble_hs_id_addr_type;
 static uint16_t conn_handle = 0U;
@@ -36,6 +25,13 @@ struct __sau_gatt_registration_service_chr_handles {
     uint16_t user_id_characteristic_handle;
     uint16_t network_state_characteristic_handle;
 } sau_gatt_registration_service_chr_handles;
+
+struct __sau_gatt_chr_vals {
+    char wifi_ssid[MAX_WIFI_SSID_LENGTH+1];
+    char wifi_psk[MAX_WIFI_PSK_LENGTH+1];
+    char user_id[MAX_USER_ID_LENGTH+1]; 
+    uint8_t network_state;
+} sau_gatt_registration_service_chr_values;
 
 static void sau_registration_ble_advertise();
 
@@ -369,4 +365,346 @@ int test_start() {
     nimble_port_freertos_init( hostTaskFn_stub );
     ESP_LOGI(TAG, "Finished test initialization");
     return ESP_OK;
+}
+
+//////////////////////
+#include "esp_vfs_fat.h"
+//#include "diskio_impl.h" 
+
+#define REGISTRATION_FILE_PATH "/spiflash/registra.dat"
+
+/*struct __fatfs_helpers {
+    FATFS* pVfsFat;
+    ff_diskio_impl_t ffDiskIoImpl;
+};*/
+
+/*esp_err_t __registration_fatfs_init(struct __fatfs_helpers* pFatfsHelpers) {
+    //nvs_open()
+    //nvs_open_from_partition()
+
+    pFatfsHelpers->pVfsFat = 0;
+    esp_err_t err = esp_vfs_fat_register("/spiflash", "fatfs", 1LLU, &pFatfsHelpers->pVfsFat);
+    if (err != ESP_OK) {
+        if (err == ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "Failure while calling esp_vfs_fat_register (ESP_ERR_INVALID_STATE). Maybe it was already called earlier?");
+        } else if (err == ESP_ERR_NO_MEM) {
+            ESP_LOGE(TAG, "Failure while calling esp_vfs_fat_register (ESP_ERR_NO_MEM).");
+        } else {
+            ESP_LOGE(TAG, "Failure while calling esp_vfs_fat_register (Other error).");
+        }
+        return ESP_FAIL;
+    }
+
+    pFatfsHelpers->ffDiskIoImpl = (ff_diskio_impl_t){};
+    ff_diskio_register(0x0U, &pFatfsHelpers->ffDiskIoImpl); // OK??
+    FRESULT fRes = f_mount(pFatfsHelpers->pVfsFat, "fatfs", 0U);
+    if (fRes != FR_OK) {
+        ESP_LOGE(TAG, "Failure while calling f_mount.");
+        return ESP_FAIL;
+    }
+    //f_fdisk()
+    //f_mkfs()
+    ESP_LOGI(TAG, "Diskio driver registered for pdrv=0x0");
+    return ESP_OK;
+}*/
+
+/*esp_err_t __registration_fatfs_deinit(struct __fatfs_helpers* pFatfsHelpers) {
+    FRESULT fRes = f_mount(NULL, "fatfs", 0U); //unmount fs
+    if (fRes != FR_OK) {
+        ESP_LOGE(TAG, "Failed to unmount filesystem.");
+        return ESP_FAIL;
+    }
+    ff_diskio_register(0x0U, NULL); // unregister diskio driver
+    
+    esp_err_t err = esp_vfs_fat_unregister_path("/spiflash");
+    if (err != ESP_OK) {
+        if (err == ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "Failure while calling esp_vfs_fat_unregister_path (ESP_ERR_INVALID_STATE). Seems like FATFS is not registered in VFS.");
+            return ESP_FAIL;
+        } else {
+            ESP_LOGE(TAG, "Failure while calling esp_vfs_fat_unregister_path (Other error).");
+            return ESP_FAIL;
+        }
+    }
+
+    ESP_LOGI(TAG, "FATFS unregistered from VFS");
+    return ESP_OK;
+}*/
+
+/**
+ * @returns 0 if drive is partitioned, 1 if it is not partitioned, 2 on error
+*/
+/*int __registration_volume_guard(struct __fatfs_helpers* pFatfsHelpers) {
+    DWORD nfreeClust = 0;
+    FRESULT fResult = f_getfree(REGISTRATION_FILE_PATH, &nfreeClust, &pFatfsHelpers->pVfsFat);
+    if (fResult != FR_OK) {
+        return 2;
+    }
+    if (pFatfsHelpers->pVfsFat->n_fatent - 2 == nfreeClust) {
+        return 1;
+    } else {
+        return 0;
+    }
+}*/
+
+/*esp_err_t __registration_volume_prepare() {
+    LBA_t partitionTable[] = {0x400};//?
+    FRESULT fResult = f_fdisk(0x0U, partitionTable, NULL);
+    if (fResult != FR_OK) {
+        ESP_LOGE(TAG, "f_fdisk failed.");
+        return ESP_FAIL;
+    }
+    void* workBuf = malloc (FF_MAX_SS);
+    fResult = f_mkfs("/spiflash", NULL, workBuf, FF_MAX_SS);
+    free (workBuf);
+    if (fResult != FR_OK) {
+        ESP_LOGE(TAG, "f_mkfs failed.");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Successfully partitioned the drive and formatted the filesystem.");
+    return ESP_OK;
+}*/
+
+/**
+ * @side_effect Partitions drive and formats filesystem if neccessary
+*/
+/*registration_status_t __registration_status_get(struct __fatfs_helpers* pFatfsHelpers) {
+    int volGuard_retVal = __registration_volume_guard(pFatfsHelpers);
+    if (volGuard_retVal == 1) {
+        ESP_LOGI(TAG, "Drive not partitioned. Partitioning and initializing filesystem...");
+        esp_err_t volPrepare_err = __registration_volume_prepare();
+        if (volPrepare_err != ESP_OK) {
+            ESP_LOGE(TAG, "__registration_volume_prepare errored.");
+            exit(EXIT_FAILURE);
+        }
+        return DEVICE_UNREGISTERED;
+    } else if (volGuard_retVal == 2) {
+        ESP_LOGE(TAG, "__registration_volume_guard errored.");
+        return DEVICE_REGISTRATION_STATUS_UNKNOWN;
+    } else if (volGuard_retVal != 0) {
+        ESP_LOGE(TAG, "__registration_volume_guard returned with unknown status code.");
+        return DEVICE_REGISTRATION_STATUS_UNKNOWN;
+    }
+
+    FILINFO finfo = {};
+    FRESULT fResult = f_stat(REGISTRATION_FILE_PATH, &finfo);
+    if (fResult == FR_OK) {
+        ESP_LOGI(TAG, "%s file exists", REGISTRATION_FILE_PATH);
+        return DEVICE_REGISTERED;
+    } else if (fResult == FR_NO_FILE) {
+        ESP_LOGI(TAG, "%s file doesn't exist", REGISTRATION_FILE_PATH);
+        return DEVICE_UNREGISTERED;
+    } else {
+        ESP_LOGE(TAG, "f_stat failed for %s", REGISTRATION_FILE_PATH);
+        return DEVICE_REGISTRATION_STATUS_UNKNOWN;
+    }
+}*/
+
+/*registration_status_t registration_check_device_registered() {
+    struct __fatfs_helpers fatfsHelpers = {};
+    esp_err_t err = __registration_fatfs_init(&fatfsHelpers);
+    if (err == ESP_OK) {
+        // [TODO] Do something with the filesystem, optionally use additional configuration
+        registration_status_t registrationStatus = __registration_status_get(&fatfsHelpers);
+        
+        err = __registration_fatfs_deinit(&fatfsHelpers);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "FatFS deinitialization failed");
+        }
+        return registrationStatus;
+    } else {
+        ESP_LOGE(TAG, "FatFS initialization failed");
+        return DEVICE_REGISTRATION_STATUS_UNKNOWN;
+    }
+}*/
+
+struct ___fatfs_helpers {
+    esp_vfs_fat_mount_config_t mountConfig;
+    wl_handle_t wlHandle;
+};
+
+esp_err_t ___registration_fatfs_init(struct ___fatfs_helpers* out_pFatFsHelpers) {
+    *out_pFatFsHelpers = (struct ___fatfs_helpers){
+        .mountConfig = {
+            .allocation_unit_size = 0, // use sector-size alloc unit
+            .disk_status_check_enable = false,
+            .format_if_mount_failed = true,
+            .max_files = 1
+        },
+        .wlHandle = 0
+    };
+    
+    esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl("/spiflash", "fatfs", &out_pFatFsHelpers->mountConfig, &out_pFatFsHelpers->wlHandle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Couldn't mount the filesystem or formatting failed. (esp_vfs_fat_spiflash_mount_rw_wl failure).");
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+esp_err_t ___registration_fatfs_deinit(struct ___fatfs_helpers* pFatfsHelpers) {
+    esp_err_t err = esp_vfs_fat_spiflash_unmount_rw_wl("/spiflash", pFatfsHelpers->wlHandle);
+    if (err != ESP_OK) {
+        if (err == ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "esp_vfs_fat_spiflash_unmount_rw_wl failed. Probably esp_vfs_fat_spiflash_mount_rw_wl hasn't been called!");
+            
+        } else {
+            ESP_LOGE(TAG, "esp_vfs_fat_spiflash_unmount_rw_wl failed (Other error)");
+        }
+        return ESP_FAIL; 
+    }
+    return ESP_OK;
+}
+
+#define yields ,
+#define with ,
+#define both(x, y) ((x) && (y))
+
+UINT ___registration_fio_read_str(FIL* pFil, char** pStr, UINT maxLength) {
+    char c = '?';
+    UINT nc = 0U;
+    UINT n = 0U;
+    while(f_read(pFil, &c, 1U, &nc)
+          yields both(nc == 1U, c != '\n' && n < maxLength)) {
+        (*pStr)[n++] = c;
+    }
+    (*pStr)[n] = '\0';
+    return n;
+}
+
+esp_err_t ___registration_fio_read_u32(FIL* pFil, uint32_t* out_pVal) {
+    UINT nb = 0U;
+    f_read(pFil, (void*)out_pVal, 4U, &nb);
+    if (nb != 4U) {
+        ESP_LOGE(TAG, "Failed to read 4 bytes of u32 from file.");
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+/*void logi(char* msg, ...) {
+    ESP_LOGI(TAG, msg, __VALIST);
+}*/
+
+void ___registration_file_closed_message(FRESULT fr, char* filePath) {
+    if (fr == FR_OK) {
+        ESP_LOGI(TAG, "Closed %s", filePath);
+    } else {
+        ESP_LOGE(TAG, "Failed to close %s", filePath);
+    }
+}
+
+#define rffdFALLBACK(___fr, ___pFil) return (___fr=f_close(___pFil), ___registration_file_closed_message(___fr, REGISTRATION_FILE_PATH), ESP_FAIL)
+#define rffdSUCCEED_DISPOSE(___fr, ___pFil) return (___fr=f_close(___pFil), ___registration_file_closed_message(___fr, REGISTRATION_FILE_PATH), ESP_OK);
+#define AACC 5
+esp_err_t ___registration_fio_fetch_data(registration_data_t* out_pRegistrationData) {
+    FIL fil = {}; 
+    FRESULT fr = FR_OK;
+    f_open(&fil, REGISTRATION_FILE_PATH, FA_READ);
+    UINT ssidLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->pCharacteristics->wifi_ssid, MAX_WIFI_SSID_LENGTH);
+    if (ssidLength < MIN_WIFI_SSID_LENGTH || ssidLength > MAX_WIFI_SSID_LENGTH) {
+        ESP_LOGE(TAG, "Detected invalid SSID length in %s !", REGISTRATION_FILE_PATH);
+        //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
+        rffdFALLBACK(fr, &fil);
+    }
+    UINT pskLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->pCharacteristics->wifi_psk, MAX_WIFI_PSK_LENGTH);
+    if (pskLength < MIN_WIFI_PSK_LENGTH || pskLength > MAX_WIFI_PSK_LENGTH) {
+        ESP_LOGE(TAG, "Detected invalid PSK length in %s !", REGISTRATION_FILE_PATH);
+        //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
+        rffdFALLBACK(fr, &fil);
+    }
+    UINT uidLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->pCharacteristics->user_id, MAX_USER_ID_LENGTH);
+    if (uidLength < MIN_USER_ID_LENGTH || uidLength > MAX_USER_ID_LENGTH) {
+        ESP_LOGE(TAG, "Detected invalid UID length in %s !", REGISTRATION_FILE_PATH);
+        //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
+        rffdFALLBACK(fr, &fil);
+    }
+    
+    esp_err_t err = ___registration_fio_read_u32(&fil, &out_pRegistrationData->cam_id);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read cam_id from %s !", REGISTRATION_FILE_PATH);
+        //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
+        rffdFALLBACK(fr, &fil);
+    }
+
+    UINT ckeyLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->ckey, CKEY_LENGTH);
+    if (ckeyLength != CKEY_LENGTH) {
+        ESP_LOGE(TAG, "Detected invalid ckey length in %s !", REGISTRATION_FILE_PATH);
+        //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
+        rffdFALLBACK(fr, &fil);
+    }
+    
+    //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_OK);
+    rffdSUCCEED_DISPOSE(fr, &fil);
+}
+
+esp_err_t registration_main() {
+    registration_data_t registrationData = {};
+    registration_init(&registrationData);
+    registration_status_t registrationStatus = registration_check_device_registered(&registrationData);
+    switch (registrationStatus) {
+        case DEVICE_REGISTERED:
+            ESP_LOGI(TAG, "Device is registered.");
+            break;
+        case DEVICE_UNREGISTERED:
+            ESP_LOGI(TAG, "Device is NOT registered.");
+            break;
+        case DEVICE_REGISTRATION_STATUS_UNKNOWN:
+            ESP_LOGE(TAG, "Device registration check failed.");
+            return ESP_FAIL;
+        default:
+            ESP_LOGE(TAG, "Unexpected device registration check result.");
+            return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+/**
+ * @param out_pRegistrationData If the device has been already registered, the structure pointed by this argument is filled with registration data.
+*/
+registration_status_t registration_check_device_registered(registration_data_t* out_pRegistrationData) {
+    struct ___fatfs_helpers fatfsHelpers = {};
+    esp_err_t err = ___registration_fatfs_init(&fatfsHelpers);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "fatfs initialization failed");
+        return DEVICE_REGISTRATION_STATUS_UNKNOWN;
+    } else { ESP_LOGI(TAG, "fatfs initialization succeeeded");  }
+
+    registration_status_t registrationStatus = DEVICE_REGISTRATION_STATUS_UNKNOWN;
+
+    FILINFO finfo = {};
+    FRESULT fResult = f_stat(REGISTRATION_FILE_PATH, &finfo);
+    if (fResult == FR_OK) {
+        ESP_LOGI(TAG, "%s file exists", REGISTRATION_FILE_PATH);
+        registrationStatus = DEVICE_REGISTERED;
+    } else if (fResult == FR_NO_FILE) {
+        ESP_LOGI(TAG, "%s file doesn't exist", REGISTRATION_FILE_PATH);
+        registrationStatus = DEVICE_UNREGISTERED;
+    } else if (fResult == FR_NO_PATH) {
+        ESP_LOGI(TAG, "%s path not found", REGISTRATION_FILE_PATH);
+        registrationStatus = DEVICE_UNREGISTERED;
+    } else {
+        ESP_LOGE(TAG, "f_stat failed for %s with unexpected error code [%u]", REGISTRATION_FILE_PATH, fResult);
+        registrationStatus = DEVICE_REGISTRATION_STATUS_UNKNOWN;
+    }
+
+    if (registrationStatus == DEVICE_REGISTERED) {
+        // Fill structure pointed by `out_pRegistrationData`
+        err = ___registration_fio_fetch_data(out_pRegistrationData);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully fetched registration data from file.");
+        } else {
+            ESP_LOGE(TAG, "Failed to fetch registration data from file.");
+        }
+    }
+
+    err = ___registration_fatfs_deinit(&fatfsHelpers);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "fatfs deinitialization failed");
+    } else { ESP_LOGI(TAG, "fatfs deinitialization succeeeded");  }
+    return registrationStatus;
+}
+
+void registration_init(registration_data_t* out_pRegistrationData) {
+    out_pRegistrationData->pCharacteristics = &sau_gatt_registration_service_chr_values;
 }
