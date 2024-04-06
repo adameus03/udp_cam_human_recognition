@@ -67,7 +67,9 @@ esp_err_t camera_init(int frame_size, int jpeg_quality){
         return err;
     }
     //change the frame size
+    ESP_LOGI(TAG, "Calling esp_camera_sensor_get");
     sensor_t * s = esp_camera_sensor_get();
+    ESP_LOGI(TAG, "Returned from esp_camera_sensor_get");
     s->set_framesize(s, (framesize_t)frame_size);
     //change the jpeg quality
     s->set_quality(s, jpeg_quality);

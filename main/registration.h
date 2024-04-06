@@ -72,18 +72,27 @@ typedef enum {
     NETWORK_STATE_WIFI_CONNECTED = 1U
 } registration_network_state_t;
 
+struct __sau_gatt_chr_vals {
+    char wifi_ssid[MAX_WIFI_SSID_LENGTH+1];
+    char wifi_psk[MAX_WIFI_PSK_LENGTH+1];
+    char user_id[MAX_USER_ID_LENGTH+1]; 
+    uint8_t network_state;
+};
+
 typedef struct {
     struct __sau_gatt_chr_vals* pCharacteristics; 
     uint32_t cam_id;
     char ckey[CKEY_LENGTH+1];
 } registration_data_t;
 
-int test_start();
+typedef registration_network_state_t (*registrationCallback_Function)(registration_data_t* pRegistrationData);
+
+int ble_interface_start();
 
 void registration_init(registration_data_t* out_pRegistrationData);
 registration_status_t registration_check_device_registered(registration_data_t* out_pRegistrationData);
 registration_network_state_t registration_check_wifi_credentials_and_connect(const char* ssid, const char* psk);
 
-esp_err_t registration_main();
+esp_err_t registration_main(registration_data_t* out_pRegistrationData, registrationCallback_Function registrationCallback);
 
 #endif

@@ -11,6 +11,12 @@
 
 static const char *TAG = "main";
 
+registration_network_state_t app_registration_handler(registration_data_t* pRegistrationData) {
+    // Check network connection
+    return wifi_connect(pRegistrationData->pCharacteristics->wifi_ssid, pRegistrationData->pCharacteristics->wifi_psk) == ESP_OK;
+    //return NETWORK_STATE_WIFI_DISCONNECTED;
+}
+
 void app_main(void)
 {
     // Disable the watchdog timer
@@ -26,21 +32,36 @@ void app_main(void)
     }
         ESP_ERROR_CHECK(err);
 
-    //ESP_ERROR_CHECK(esp_netif_init()); //??? Ble conflict ??? ///!!!!! DISABLE THIS
+    ESP_ERROR_CHECK(esp_netif_init()); //??? Ble conflict ??? ///!!!!! DISABLE THIS
+    ESP_LOGI(TAG, "TCP/IP stack initialized."); // CALL wifi_connect() to test network connection <<<<<< [TODO NOW] + check if ble works while netif is initialized 
+
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     
     //vTaskPrioritySet(NULL, 5);//set the priority of the main task to 5 ? 
     
-    ////////////////test_start();
-    err = registration_main();
+    registration_data_t registrationData = {};
+    /*err = ESP_OK;[debug]*/err = registration_main(&registrationData, app_registration_handler);
+    //ESP_ERROR_CHECK(wifi_connect("ama", "2a0m0o3n")); //[debug]
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "registration_main returned error code [%d]", err);
+    } else {
+        ESP_LOGI(TAG, "Successfully returned from registration_main");
+        camau_controller_init();
+        camau_controller_run(); //CAMAU is mainly executed on core 1
+    }
+
+    return;
+    ////test_start();
+    /*err = registration_main();
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "registration_main exited with success.");
     } else {
         ESP_LOGE(TAG, "registration_main exited with fail.");
     }
-    return;
+    return;*/
 
     //////ESP_ERROR_CHECK(wifi_connect());
+    //////ESP_LOGI(TAG, "After wifi_connect");//
     //////camau_controller_init();
     //////camau_controller_run(); //CAMAU is mainly executed on core 1
     //////return;

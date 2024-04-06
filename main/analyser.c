@@ -4,6 +4,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "sau_heap_debug.h"
+
 static const char * TAG = "analyser";
 
 void analyser_init() {
@@ -16,16 +18,22 @@ void __analyser_task(void *pvParameters) {
     //call camera_capture() in a loop to capture images continuously and process them
     while(1) {
         camera_capture();
-        //vTaskDelay(5 / portTICK_PERIOD_MS);
+        vTaskDelay(5 / portTICK_PERIOD_MS);
     }
 }
 
 void analyser_run(uint32_t usStackDepth) {
     ESP_LOGI(TAG, "Running analyser");
     camera_init(FRAMESIZE_UXGA, 12);
+    ESP_LOGI(TAG, "Returned from camera_init");
+
+
+    sau_heap_debug_info();
+    ESP_LOGI(TAG, "Going to allocate stack for task analyser_task, needed heap memory block: %lu", usStackDepth);
+
     // Create the analyser task on core 1
-    
     xTaskCreatePinnedToCore(__analyser_task, "analyser_task", usStackDepth, NULL, 5, NULL, 1);
+    //__analyser_task(NULL);
 }
 
 

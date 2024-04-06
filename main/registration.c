@@ -11,10 +11,12 @@
 //#include "nimble"
 #include "esp_log.h"
 #include "registration.h"
+#include "sau_heap_debug.h"
 
-static const char* TAG = "registration";
+static const char* TAG = "registration"; 
 
-int test_value = 0;
+static SemaphoreHandle_t s_semph_get_registration = NULL;
+static SemaphoreHandle_t s_semph_shutdown_ble = NULL;
 
 static uint8_t sau_ble_hs_id_addr_type;
 static uint16_t conn_handle = 0U;
@@ -26,12 +28,7 @@ struct __sau_gatt_registration_service_chr_handles {
     uint16_t network_state_characteristic_handle;
 } sau_gatt_registration_service_chr_handles;
 
-struct __sau_gatt_chr_vals {
-    char wifi_ssid[MAX_WIFI_SSID_LENGTH+1];
-    char wifi_psk[MAX_WIFI_PSK_LENGTH+1];
-    char user_id[MAX_USER_ID_LENGTH+1]; 
-    uint8_t network_state;
-} sau_gatt_registration_service_chr_values;
+struct __sau_gatt_chr_vals sau_gatt_registration_service_chr_values;
 
 static void sau_registration_ble_advertise();
 
@@ -83,6 +80,7 @@ int on_gatt_wifi_psk_charatecteristic_access(uint16_t conn_handle, uint16_t attr
             ESP_LOGI(TAG, "Successfully written characteristic value");
             memset(sau_gatt_registration_service_chr_values.wifi_psk + rx_len, 0, MAX_WIFI_PSK_LENGTH - rx_len);
             ESP_LOGI(TAG, "Provided wifi_psk = {%s}", sau_gatt_registration_service_chr_values.wifi_psk);
+            xSemaphoreGive(s_semph_get_registration); // unblock task which triggers wifi connectivity verification
         } else {
             ESP_LOGE(TAG, "Failed to write characteristic value");
         }
@@ -102,18 +100,7 @@ int on_gatt_user_id_charatecteristic_access(uint16_t conn_handle, uint16_t attr_
             ESP_LOGI(TAG, "Provided user_id = {%s}", sau_gatt_registration_service_chr_values.user_id);
 
             ///
-            struct os_mbuf *om = ble_hs_mbuf_from_flat(&sau_gatt_registration_service_chr_values.network_state, 1U);
             
-            if (om == NULL) {
-                ESP_LOGE(TAG, "Failed to allocate mbuf for GATT notification.");
-            } else {
-                if (0 != ble_gatts_notify_custom(conn_handle, sau_gatt_registration_service_chr_handles.network_state_characteristic_handle, om)) {
-                    ESP_LOGE(TAG, "Failed to notify BLE central.");
-                } else {
-                    ESP_LOGI(TAG, "Sent GATT notification to BLE central.");
-                    sau_gatt_registration_service_chr_values.network_state = !sau_gatt_registration_service_chr_values.network_state;
-                }
-            }
             ///
         } else {
             ESP_LOGE(TAG, "Failed to write characteristic value");
@@ -128,7 +115,24 @@ int on_gatt_network_state_characteristic_access(uint16_t conn_handle, uint16_t a
     return 0;
 }
 
-
+/**
+ * @note sau_gatt_registration_service_chr_values.network_state needs to be first set!
+*/
+void notify_ble_central() {
+    ///
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(&sau_gatt_registration_service_chr_values.network_state, 1U);
+    
+    if (om == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate mbuf for GATT notification.");
+    } else {
+        if (0 != ble_gatts_notify_custom(conn_handle, sau_gatt_registration_service_chr_handles.network_state_characteristic_handle, om)) {
+            ESP_LOGE(TAG, "Failed to notify BLE central.");
+        } else {
+            ESP_LOGI(TAG, "Sent GATT notification to BLE central.");
+        }
+    }
+    ///
+}
 
 /* Stub */
 static const struct ble_gatt_svc_def gatt_server_services[] = {
@@ -188,9 +192,18 @@ void hostTaskFn_stub(void* arg) {
     ESP_LOGI(TAG, "I'm in the host task stub function");
 
 
-    nimble_port_run();
-    nimble_port_freertos_deinit(); //This function will return only when nimble_port_stop() is executed
-    
+    nimble_port_run(); //This function will return only when nimble_port_stop() is executed
+    ESP_LOGI(TAG, "nimble_port_run returned");
+
+    xSemaphoreGive(s_semph_shutdown_ble);
+    nimble_port_freertos_deinit();
+    //ESP_LOGI(TAG, "after nimble_port_freertos_deinit");
+    /*esp_err_t err = nimble_port_deinit();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nimble_port_deinit failed.");
+        exit(EXIT_FAILURE);
+    }*/
+
     /*while(1) {
         vTaskDelay(1000 / portTICK_PERIOD_MS);
         ESP_LOGI(TAG, "Host task stub function heartbeat log");
@@ -201,6 +214,7 @@ void hostTaskFn_stub(void* arg) {
     
 }*/
 
+static unsigned char is_ble_shutting_down = 0U;
 /**
  * @attention Might need additional event handling in future
 */
@@ -219,7 +233,9 @@ int ble_gap_event_handler(struct ble_gap_event *event, void *arg) {
             break;
         case BLE_GAP_EVENT_DISCONNECT:
             ESP_LOGI(TAG, "Event --- BLE_GAP_EVENT_DISCONNECT");
-            sau_registration_ble_advertise();
+            if (is_ble_shutting_down == 0U) {
+                sau_registration_ble_advertise();
+            }
             break;
         case BLE_GAP_EVENT_ADV_COMPLETE:
             ESP_LOGI(TAG, "Event --- BLE_GAP_EVENT_ADV_COMPLETE");
@@ -311,9 +327,9 @@ void on_ble_hs_reset_stub(int reason) {
 }
 
 /**
- * Stub function for testing NimBLE port API
+ * Activate BLE interface using NimBLE port API
 */
-int test_start() {
+int ble_interface_start() {
     //esp_nimble_hci_init();
     //sau_gatt_registration_service_chr_handles.network_state_characteristic_handle = NETWORK_STATE_WIFI_DISCONNECTED;
     //memset(sau_gatt_registration_service_chr_values.wifi_ssid, 0, MAX_WIFI_SSID_LENGTH);
@@ -366,6 +382,35 @@ int test_start() {
     ESP_LOGI(TAG, "Finished test initialization");
     return ESP_OK;
 }
+
+/**
+ * Deactivate BLE interface with NimBLE port API
+*/
+int ble_interface_stop() {
+    is_ble_shutting_down = 1U;
+
+    s_semph_shutdown_ble = xSemaphoreCreateBinary();
+    if (s_semph_get_registration == NULL) {
+        ESP_LOGE(TAG, "No memory for BLE shutdown semaphore");
+        return ESP_ERR_NO_MEM;
+    }
+    ESP_LOGI(TAG, "BLE shutdown semaphore created successfully");
+
+    int nimblePortStopRetVal = nimble_port_stop();
+    if (nimblePortStopRetVal != 0) {
+        ESP_LOGE(TAG, "nimble_port_stop failed with code [%d].", nimblePortStopRetVal);
+        exit(EXIT_FAILURE);
+    }
+    esp_err_t err = nimble_port_deinit();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nimble_port_deinit failed.");
+        return 1;
+    }
+    ESP_LOGI(TAG, "Waiting for complete BLE shutdown...");
+    xSemaphoreTake(s_semph_shutdown_ble, portMAX_DELAY);
+    return 0;
+}
+
 
 //////////////////////
 #include "esp_vfs_fat.h"
@@ -596,7 +641,7 @@ void ___registration_file_closed_message(FRESULT fr, char* filePath) {
 
 #define rffdFALLBACK(___fr, ___pFil) return (___fr=f_close(___pFil), ___registration_file_closed_message(___fr, REGISTRATION_FILE_PATH), ESP_FAIL)
 #define rffdSUCCEED_DISPOSE(___fr, ___pFil) return (___fr=f_close(___pFil), ___registration_file_closed_message(___fr, REGISTRATION_FILE_PATH), ESP_OK);
-#define AACC 5
+
 esp_err_t ___registration_fio_fetch_data(registration_data_t* out_pRegistrationData) {
     FIL fil = {}; 
     FRESULT fr = FR_OK;
@@ -638,10 +683,25 @@ esp_err_t ___registration_fio_fetch_data(registration_data_t* out_pRegistrationD
     rffdSUCCEED_DISPOSE(fr, &fil);
 }
 
-esp_err_t registration_main() {
-    registration_data_t registrationData = {};
-    registration_init(&registrationData);
-    registration_status_t registrationStatus = registration_check_device_registered(&registrationData);
+
+
+
+/**
+ * @note registrationCallback will be called each time the client writes to the wifi_psk characteristic
+*/
+esp_err_t registration_main(registration_data_t* out_pRegistrationData, registrationCallback_Function registrationCallback) {
+    registration_init(out_pRegistrationData);
+
+    struct ___fatfs_helpers fatfsHelpers = {};
+    esp_err_t err = ___registration_fatfs_init(&fatfsHelpers);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "fatfs initialization failed");
+        return DEVICE_REGISTRATION_STATUS_UNKNOWN;
+    } else { ESP_LOGI(TAG, "fatfs initialization succeeded");  }
+
+
+    registration_status_t registrationStatus = registration_check_device_registered(out_pRegistrationData);
+    
     switch (registrationStatus) {
         case DEVICE_REGISTERED:
             ESP_LOGI(TAG, "Device is registered.");
@@ -656,19 +716,86 @@ esp_err_t registration_main() {
             ESP_LOGE(TAG, "Unexpected device registration check result.");
             return ESP_FAIL;
     }
+
+    /*[DEBUG]*/sau_heap_debug_info();
+    ///*[DEBUG]*/memset(out_pRegistrationData->pCharacteristics->wifi_ssid, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_ssid)); memset(out_pRegistrationData->pCharacteristics->wifi_psk, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_psk)); memcpy(out_pRegistrationData->pCharacteristics->wifi_ssid, "ama", strlen("ama")); memcpy(out_pRegistrationData->pCharacteristics->wifi_psk, "2a0m0o3n", strlen("2a0m0o3n")); registrationStatus = DEVICE_REGISTERED; registrationCallback(out_pRegistrationData);
+    if (registrationStatus == DEVICE_UNREGISTERED) {
+        //Start BLE
+        int rv = ble_interface_start();
+        if (rv != 0) {
+            ESP_LOGE(TAG, "ble_interface_start returned with failure code [%d]", rv);
+            return ESP_FAIL;
+        }
+        ESP_LOGI(TAG, "ble_interface_start returned successfully");
+        /*[DEBUG]*/sau_heap_debug_info();
+
+        //Wait for registration data and check WiFi network credentials
+        s_semph_get_registration = xSemaphoreCreateBinary();
+        if (s_semph_get_registration == NULL) {
+            ESP_LOGE(TAG, "No memory for registration semaphore");
+            return ESP_ERR_NO_MEM;
+        }
+        ESP_LOGI(TAG, "Registration semaphore created successfully");
+        /*[DEBUG]*/sau_heap_debug_info();
+
+        registration_network_state_t networkState = NETWORK_STATE_WIFI_DISCONNECTED;
+        do {
+            ESP_LOGI(TAG, "Waiting for mobile app registration...");
+            xSemaphoreTake(s_semph_get_registration, portMAX_DELAY);
+            ESP_LOGI(TAG, "xSemaphoreTake returned (registration semaphore)");
+            /*[DEBUG]*/sau_heap_debug_info();
+
+            ///*[DEBUG]*/ memset(out_pRegistrationData->pCharacteristics->wifi_ssid, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_ssid)); memset(out_pRegistrationData->pCharacteristics->wifi_psk, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_psk)); memcpy(out_pRegistrationData->pCharacteristics->wifi_ssid, "ama", strlen("ama")); memcpy(out_pRegistrationData->pCharacteristics->wifi_psk, "2a0m0o3n", strlen("2a0m0o3n")); registrationCallback(out_pRegistrationData); networkState = NETWORK_STATE_WIFI_CONNECTED;
+            networkState = registrationCallback(out_pRegistrationData);
+            ///*[debug]*/ networkState = wifi_connect(out_pRegistrationData->pCharacteristics->wifi_ssid, out_pRegistrationData->pCharacteristics->wifi_psk) == ESP_OK;
+            sau_gatt_registration_service_chr_values.network_state = (uint8_t)networkState;
+            /*[DEBUG]*/sau_heap_debug_info();
+            notify_ble_central();
+            /*[DEBUG]*/sau_heap_debug_info();
+        } while(networkState == NETWORK_STATE_WIFI_DISCONNECTED);
+        
+        if (networkState != NETWORK_STATE_WIFI_CONNECTED) {
+            ESP_LOGE(TAG, "Unexpected registration network state.");
+            return ESP_FAIL;
+        }
+        // Stop BLE
+        ESP_LOGI(TAG, "Before ble shutdown");
+        /*[DEBUG]*/sau_heap_debug_info();
+        rv = ble_interface_stop();
+        if (rv != 0) {
+            ESP_LOGE(TAG, "ble_interface_stop returned with failure code [%d]", rv);
+            return ESP_FAIL;
+        }
+        
+        ESP_LOGI(TAG, "After ble shutdown");
+        /*[DEBUG]*/sau_heap_debug_info();
+        
+    } else {
+        //fetch registration data from file [TODO]
+        // call registrationCallback (connect WiFi) [TODO]
+    }
+    /*[debug]*/sau_heap_debug_info();
+
+    //TCP connection to server [TODO]
+    //Write registration data to file [TODO]
+
+    err = ___registration_fatfs_deinit(&fatfsHelpers);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "fatfs deinitialization failed");
+        exit(EXIT_FAILURE);
+    } else { ESP_LOGI(TAG, "fatfs deinitialization succeeeded");  }
+
+    // (CAMAU will be started by the caller)
+    ESP_LOGI(TAG, "End of registration_main");
+
     return ESP_OK;
 }
 
 /**
  * @param out_pRegistrationData If the device has been already registered, the structure pointed by this argument is filled with registration data.
+ * @note Requires FatFS to be initialized for partition `fatfs` in spiflash 
 */
 registration_status_t registration_check_device_registered(registration_data_t* out_pRegistrationData) {
-    struct ___fatfs_helpers fatfsHelpers = {};
-    esp_err_t err = ___registration_fatfs_init(&fatfsHelpers);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "fatfs initialization failed");
-        return DEVICE_REGISTRATION_STATUS_UNKNOWN;
-    } else { ESP_LOGI(TAG, "fatfs initialization succeeeded");  }
 
     registration_status_t registrationStatus = DEVICE_REGISTRATION_STATUS_UNKNOWN;
 
@@ -690,7 +817,7 @@ registration_status_t registration_check_device_registered(registration_data_t* 
 
     if (registrationStatus == DEVICE_REGISTERED) {
         // Fill structure pointed by `out_pRegistrationData`
-        err = ___registration_fio_fetch_data(out_pRegistrationData);
+        esp_err_t err = ___registration_fio_fetch_data(out_pRegistrationData);
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "Successfully fetched registration data from file.");
         } else {
@@ -698,10 +825,6 @@ registration_status_t registration_check_device_registered(registration_data_t* 
         }
     }
 
-    err = ___registration_fatfs_deinit(&fatfsHelpers);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "fatfs deinitialization failed");
-    } else { ESP_LOGI(TAG, "fatfs deinitialization succeeeded");  }
     return registrationStatus;
 }
 

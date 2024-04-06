@@ -11,7 +11,7 @@
 
 #define CONFIG_NETWORK_CONNECT_WIFI 1
 #define CONFIG_NETWORK_CONNECT_IPV4 1
-#define CONFIG_NETWORK_WIFI_CONN_MAX_RETRY 20
+#define CONFIG_NETWORK_WIFI_CONN_MAX_RETRY /*20*/5
 #define NETWORK_NETIF_DESC_STA "surv_netif_sta"
 #define CONFIG_NETWORK_WIFI_SSID /*"Livebox-0504"*/ "ama"
 #define CONFIG_NETWORK_WIFI_PASSWORD /*"2354497048477289932F1424AA"*/ "2a0m0o3n"
@@ -246,16 +246,24 @@ void network_wifi_shutdown(void)
     network_wifi_stop();
 }
 
-esp_err_t wifi_connect(void)
+unsigned char wifi_already_initialized = 0U;
+//esp_err_t wifi_connect(void)
+esp_err_t wifi_connect(char* network_ssid, char* network_psk)
 {
     ESP_LOGI(TAG, "Start wifi_connect.");
-    network_wifi_start();
-    ESP_LOGI(TAG, "After network_wifi_start.");
+    if (wifi_already_initialized == 0U) {
+        network_wifi_start();
+        ESP_LOGI(TAG, "After network_wifi_start.");
+        wifi_already_initialized = 1U;
+    } else {
+        ESP_LOGI(TAG, "Skipping wifi initialization as it was already done.");
+    }
+    
     wifi_config_t wifi_config = {
         .sta = {
 #if !CONFIG_NETWORK_WIFI_SSID_PWD_FROM_STDIN
-            .ssid = CONFIG_NETWORK_WIFI_SSID,
-            .password = CONFIG_NETWORK_WIFI_PASSWORD,
+            /*.ssid = CONFIG_NETWORK_WIFI_SSID,
+            .password = CONFIG_NETWORK_WIFI_PASSWORD,*/ /* ??? How do such assignments even work? */
 #endif
             .scan_method = NETWORK_WIFI_SCAN_METHOD,
             .sort_method = NETWORK_WIFI_CONNECT_AP_SORT_METHOD,
@@ -263,6 +271,11 @@ esp_err_t wifi_connect(void)
             .threshold.authmode = NETWORK_WIFI_SCAN_AUTH_MODE_THRESHOLD,
         },
     };
+    memset(wifi_config.sta.ssid, 0, sizeof(wifi_config.sta.ssid)); // do i need? 
+    memset(wifi_config.sta.password, 0, sizeof(wifi_config.sta.password)); // ...?
+    memcpy(wifi_config.sta.ssid, network_ssid, strlen(network_ssid));
+    memcpy(wifi_config.sta.password, network_psk, strlen(network_psk));
+
 #if CONFIG_NETWORK_WIFI_SSID_PWD_FROM_STDIN
     network_configure_stdin_stdout();
     char buf[sizeof(wifi_config.sta.ssid)+sizeof(wifi_config.sta.password)+2] = {0};

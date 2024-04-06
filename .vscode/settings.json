@@ -32,7 +32,8 @@
         "stdatomic.h": "c",
         "esp_vfs_fat.h": "c",
         "diskio_impl.h": "c",
-        "diskio.h": "c"
+        "diskio.h": "c",
+        "esp_heap_caps.h": "c"
     },
     "idf.flashType": "UART"
 }
