@@ -10,26 +10,31 @@
 #include <lwip/netdb.h>
 #include <string.h> /** @tidy Not already included? */
 
+#include "registration.h"
+
 //#pragma pack(1) // Force compiler to pack struct members together
 
 static const char * TAG = "server_communications";
-#define HOST_IP_ADDR /*"192.168.1.15"*//*"192.168.173.32"*//*"192.168.116.32"*/"192.168.43.32"
-#define PORT 3333
+#define HOST_IP_ADDR /*"192.168.1.15"*//*"192.168.173.32"*//*"192.168.116.32"*//*"192.168.43.32"*/"192.168.34.32"
+#define UDP_PORT 3333
+#define TCP_PORT 3334
 
 char host_ip[] = HOST_IP_ADDR;
 int addr_family = AF_INET;
 int ip_protocol = IPPROTO_IP;
-int sock = -1;
+int udp_sock = -1;
+int tcp_sock = -1;
 struct sockaddr_in dest_addr;
 
 esp_err_t begin_udp_stream() {
+#if SERVER_COMMUNICATIONS_USE_WOLFSSL == 0
     ESP_LOGI(TAG, "Initialising UDP stream");
     dest_addr.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
     dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(PORT);
+    dest_addr.sin_port = htons(UDP_PORT);
 
-    sock = socket(addr_family, SOCK_DGRAM/*experiment*/, ip_protocol);
-    if (sock < 0) {
+    udp_sock = socket(addr_family, SOCK_DGRAM/*experiment*/, ip_protocol);
+    if (udp_sock < 0) {
         ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
         return ESP_FAIL;
     }
@@ -43,27 +48,42 @@ esp_err_t begin_udp_stream() {
     rx_timeout.tv_sec = 0;
     rx_timeout.tv_usec = 100000;
 
-    setsockopt (sock, SOL_SOCKET, SO_SNDTIMEO, &tx_timeout, sizeof tx_timeout);
-    setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &rx_timeout, sizeof rx_timeout);
+    int rv = setsockopt (udp_sock, SOL_SOCKET, SO_SNDTIMEO, &tx_timeout, sizeof tx_timeout);
+    if (rv < 0) {
+        ESP_LOGE(TAG, "Failed to set tx timeout for udp (does it even matter...?)");
+    }
+    rv = setsockopt (udp_sock, SOL_SOCKET, SO_RCVTIMEO, &rx_timeout, sizeof rx_timeout);
+    if (rv < 0) {
+        ESP_LOGE(TAG, "Failed to set rx timeout for udp (Who will send us udp segments though...?)");
+    }
 
     // set socket to blocking mode (clear O_NONBLOCK)
-    int opts = fcntl(sock, F_GETFL);
+    int opts = fcntl(udp_sock, F_GETFL);
     opts = opts & (~O_NONBLOCK);
-    fcntl(sock, F_SETFL, opts);
+    fcntl(udp_sock, F_SETFL, opts);
 
-    ESP_LOGI(TAG, "Socket created, for sending to %s:%d", HOST_IP_ADDR, PORT);
+    ESP_LOGI(TAG, "Socket created, for sending to %s:%d", HOST_IP_ADDR, UDP_PORT);
     return ESP_OK;
+#else
+    ESP_LOGE(TAG, "Not implemented");
+    return ESP_FAIL;
+#endif
 }
 
 void end_udp_stream() {
+#if SERVER_COMMUNICATIONS_USE_WOLFSSL == 0
     ESP_LOGI(TAG, "Ending UDP stream");
-    if (sock != -1) {
+    if (udp_sock != -1) {
         ESP_LOGE(TAG, "Shutting down socket...");
-        shutdown(sock, 0);
-        close(sock);
+        shutdown(udp_sock, 0);
+        close(udp_sock);
     }
     ESP_LOGI(TAG, "Socket closed");
     x_on_udp_transmission_end();
+#else 
+    ESP_LOGE(TAG, "Not implemented");
+    return ESP_FAIL;
+#endif
 }
 
 typedef union {
@@ -96,12 +116,13 @@ typedef union {
 
 
 esp_err_t transmit_udp(uint8_t* data, size_t len) {
+#if SERVER_COMMUNICATIONS_USE_WOLFSSL == 0
     if (len > MAX_UDP_DATA_SIZE) {
         ESP_LOGE(TAG, "Max UDP data size exceeded");
         return ESP_FAIL;
     }
     ESP_LOGI(TAG, "Sending %d bytes...", len);
-    int err = sendto(sock, data, MAX_UDP_DATA_SIZE, 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+    int err = sendto(udp_sock, data, MAX_UDP_DATA_SIZE, 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
     if (err < 0) {
         ESP_LOGE(TAG, "Error occurred during sending JFIF chunk via UDP: errno %d", errno);
         return ESP_FAIL;
@@ -109,9 +130,14 @@ esp_err_t transmit_udp(uint8_t* data, size_t len) {
         ESP_LOGI(TAG, "No errors occurred during sending JFIF chunk");
         return ESP_OK;
     }
+#else 
+    ESP_LOGE(TAG, "Not implemented");
+    return ESP_FAIL;
+#endif
 }
 
 esp_err_t transmit_jfif(uint8_t** jfif_buf_ptr, size_t len) {
+#if SERVER_COMMUNICATIONS_USE_WOLFSSL == 0
     static uint32_t pkt_idx = 0U;
     uint32_t remaining_bytes = len;
     uint8_t* txPtr = *jfif_buf_ptr;
@@ -157,6 +183,10 @@ esp_err_t transmit_jfif(uint8_t** jfif_buf_ptr, size_t len) {
         remaining_bytes -= chunk_data_len;
     }
     return ESP_OK; /** @warning I haven't returned ESP_FAIL anywhere in this function */
+#else 
+    ESP_LOGE(TAG, "Not implemented");
+    return ESP_FAIL;
+#endif
 }
 
 
@@ -166,13 +196,13 @@ esp_err_t transmit_jfif(uint8_t** jfif_buf_ptr, size_t len) {
 
 esp_err_t transmit_udp(uint8_t* data, size_t len) {
     ESP_LOGI(TAG, "Sending decoy signal");
-    int err = sendto(sock, NULL, 0, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    int err = sendto(udp_sock, NULL, 0, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
     if (err < 0) {
         ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
         return ESP_FAIL;
     }
     ESP_LOGI(TAG, "Decoy signal sent, waiting for server to respond");
-    err = recvfrom(sock, NULL, 0, 0, (struct sockaddr *)&dest_addr, NULL);
+    err = recvfrom(udp_sock, NULL, 0, 0, (struct sockaddr *)&dest_addr, NULL);
     if (err < 0) {
         ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
         return ESP_FAIL;
@@ -183,14 +213,14 @@ esp_err_t transmit_udp(uint8_t* data, size_t len) {
     ESP_LOGI(TAG, "Server responded, starting jpeg transmission (%d = %d x %d + %d)", len, num_blks, blk_size, rem);
     uint16_t err_count = 0;
     for (size_t i = 0; i < num_blks; i++) {
-        int err = sendto(sock, data + i * blk_size, blk_size, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        int err = sendto(udp_sock, data + i * blk_size, blk_size, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         vTaskDelay(CHUNK_DELAY_MS / portTICK_PERIOD_MS);
         if (err < 0) {
             err_count++;
         }
     }
     if (rem > 0) {
-        int err = sendto(sock, data + num_blks * blk_size, rem, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        int err = sendto(udp_sock, data + num_blks * blk_size, rem, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         if (err < 0) {
             err_count++;
         }
@@ -221,7 +251,7 @@ esp_err_t transmit_udp(uint8_t* data, size_t len) {
     
     unsigned char server_alive = 0;
     for (size_t i = 0; i < num_blks; i++) {
-        int err = sendto(sock, data + i * blk_size, blk_size, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        int err = sendto(udp_sock, data + i * blk_size, blk_size, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         if (err < 0) {
             // Don't print an error message for each block, it's too much
             //ESP_LOGD(TAG, "Error occurred during sending blk %d: errno %d", i, errno);
@@ -233,7 +263,7 @@ esp_err_t transmit_udp(uint8_t* data, size_t len) {
         if (!server_alive) {
             // receive empty packet to confirm that the data was received
             // uint8_t pingbuf[1];
-            // err = recvfrom(sock, pingbuf, 1, 0, (struct sockaddr *)&dest_addr, NULL);
+            // err = recvfrom(udp_sock, pingbuf, 1, 0, (struct sockaddr *)&dest_addr, NULL);
 
             // if (err < 0) { // probably server is dead
             //     ESP_LOGI(TAG, "Server is not alive");
@@ -249,19 +279,19 @@ esp_err_t transmit_udp(uint8_t* data, size_t len) {
         //}
     }
     if (err_count == 0 && rem > 0) {
-        int err = sendto(sock, data + num_blks * blk_size, rem, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        int err = sendto(udp_sock, data + num_blks * blk_size, rem, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         if (err < 0) {
             //ESP_LOGD(TAG, "Error occurred during sending: errno %d", errno);
             err_count++;
         }
-        //recvfrom(sock, NULL, 0, 0, (struct sockaddr *)&dest_addr, NULL);
+        //recvfrom(udp_sock, NULL, 0, 0, (struct sockaddr *)&dest_addr, NULL);
         //else if (err != rem) {
         //    ESP_LOGE(TAG, "FATAL error occurred during sending: sent %d bytes, expected %d", err, rem);
         //}
     }
     
     // /^// Send a message to say the data is complete
-    // int err = sendto(sock, "END_01234321", 12, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr)); // END_01234321 is a unique message to indicate the end of the data
+    // int err = sendto(udp_sock, "END_01234321", 12, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr)); // END_01234321 is a unique message to indicate the end of the data
     // if (err < 0) {
     //     ESP_LOGD(TAG, "Error occurred during sending end marker!: errno %d", errno);
     //     err_count++;
@@ -286,3 +316,222 @@ esp_err_t transmit_udp(uint8_t* data, size_t len) {
 
     return ESP_OK;
 }*/
+///////////////
+
+/*
+    TCP COMMUNICATIONS - data structures for application control
+*/
+
+#define COMM_NETIF_WIFI_STA_MAC_ADDR_LENGTH 6
+#define COMM_CSID_LENGTH 16
+
+typedef union { // op = APP_CONTROL_OP_REGISTER
+    struct {
+        char user_id[MAX_USER_ID_LENGTH]; // UID obtained from the client app
+        char cid[CID_LENGTH]; // Cam ID - generated by server
+        char ckey[CKEY_LENGTH]; // Cam auth key - generated by cam
+        uint8_t dev_mac[COMM_NETIF_WIFI_STA_MAC_ADDR_LENGTH]; // WiFi sta if mac addr
+    };
+    uint8_t raw[MAX_USER_ID_LENGTH + COMM_NETIF_WIFI_STA_MAC_ADDR_LENGTH + CID_LENGTH + CKEY_LENGTH];
+} application_registration_section_t;
+
+typedef union { // op = APP_CONTROL_OP_INITCOMM
+    struct {
+        char cid[CID_LENGTH]; // Cam ID
+        char ckey[CKEY_LENGTH]; // Cam auth key
+        char csid[COMM_CSID_LENGTH]; // Cam session ID
+    };
+    uint8_t raw[CID_LENGTH + CKEY_LENGTH + COMM_CSID_LENGTH];
+} application_initcomm_section_t;
+
+#define APP_CONTROL_CAM_CONFIG_RES_OK 0U
+#define APP_CONTROL_CAM_CONFIG_RES_JPEG_QUALITY_UNSUPPORED 1U
+#define APP_CONTROL_CAM_CONFIG_RES_FRAMESIZE_UNSUPPORTED 2U
+
+typedef union { // op = APP_CONTROL_OP_CAM_SET_CONFIG or op = APP_CONTROL_OP_CAM_GET_CONFIG
+    struct {
+        int32_t jpeg_quality;
+        uint8_t vflip_enable;
+        uint8_t hmirror_enable;
+        uint8_t framesize; // see espressif__esp32-camera/driver/include/sensor.h:framesize_t
+        uint8_t res; // operation result code
+    };
+    uint8_t raw[7];
+} application_camera_config_section_t;
+
+#define MAX_NUM_SUPPORTED_FRAMESIZES 20
+
+typedef union { // op = APP_CONTROL_OP_CAM_GET_CAPS
+    struct {
+        int32_t min_jpeg_quality;
+        int32_t max_jpeg_quality;
+        uint8_t num_supported_framesizes;
+        uint8_t supported_framesizes[MAX_NUM_SUPPORTED_FRAMESIZES];
+    };
+    uint8_t raw[9 + MAX_NUM_SUPPORTED_FRAMESIZES];
+} application_camera_caps_section_t;
+
+typedef union { // op = APP_CONTROL_OP_ENERGY_SAVING_SCHED_SLEEP or op = APP_CONTROL_OP_ENERGY_SAVING_SHUTDOWN_NETIF_SCHED
+    struct {
+        uint32_t energy_saving_starts_in_seconds;
+        uint32_t energy_saving_duration_seconds;
+    };
+    uint8_t raw[8];
+} application_sched_section_t;
+
+#define DEVICE_NAME_MAX_LENGTH 20
+#define FIRMWARE_VERSION_MAX_LENGTH 20 
+
+typedef union { // op = APP_CONTROL_OP_GET_DEVICE_INFO
+    struct {
+        uint32_t num_resets;
+        uint32_t seconds_since_last_reset;
+        uint32_t seconds_since_last_firmware_update;
+        uint32_t seconds_since_prod_flash;
+        char device_name[DEVICE_NAME_MAX_LENGTH];
+        char firmware_version[FIRMWARE_VERSION_MAX_LENGTH];
+        uint8_t supports_avc;
+        uint8_t supports_hevc;
+        uint8_t supports_dma;
+    };
+    uint8_t raw[19 + DEVICE_NAME_MAX_LENGTH + FIRMWARE_VERSION_MAX_LENGTH];
+} application_device_info_section_t;
+
+#define APP_CONTROL_OP_NOP 0x0U
+#define APP_CONTROL_OP_REGISTER 0x1U //device registration
+#define APP_CONTROL_OP_UNREGISTER 0x2U // server-triggered unregistration
+#define APP_CONTROL_OP_INITCOMM 0x3U //for registered device - when tcp comm init (use ckey). Occurs when device initiates connection to server
+#define APP_CONTROL_OP_CAM_SET_CONFIG 0x4U
+#define APP_CONTROL_OP_CAM_GET_CONFIG 0x5U
+#define APP_CONTROL_OP_CAM_GET_CAPS 0x6U
+#define APP_CONTROL_OP_CAM_START_UNCONDITIONAL_STREAM 0x7U
+#define APP_CONTROL_OP_CAM_STOP_UNCONDITIONAL_STREAM 0x8U
+#define APP_CONTROL_OP_ANALYSE 0x9U //Make the server AI analyse images and decide when to stop video transmission (UDP) with a terminating segment (op = APP_CONTROL_OP_CAM_STOP_ANALYSER_STREAM)
+#define APP_CONTROL_OP_CAM_STOP_ANALYSER_STREAM 0xAU // Terminate camera analyser-triggered UDP video stream as the server AI decided, that the report can be ignored
+#define APP_CONTROL_OP_ENERGY_SAVING_SHUTDOWN_ANALYSER 0xBU
+#define APP_CONTROL_OP_ENERY_GAVING_WAKEUP_ANALYSER 0xCU
+#define APP_CONTROL_OP_ENERGY_SAVING_SHUTDOWN_NETIF 0xDU // Shuts the connection until the analyser reactivates it or the device gets reset for some reason
+#define APP_CONTROL_OP_ENERGY_SAVING_SHUTDOWN_NETIF_SCHED 0xEU // Shutdown the connection for some time (analyser will reactivate it if needed)
+#define APP_CONTROL_OP_ENERGY_SAVING_SCHED_SLEEP 0xFU // Put device to sleep for some time
+#define APP_CONTROL_OP_OTA 0x10U // OTA Firmware update
+#define APP_CONTROL_OP_SOFTWARE_DEVICE_RESET 0x11U // Trigger device software reset
+#define APP_CONTROL_OP_GET_DEVICE_INFO 0x12U
+#define APP_CONTROL_OP_UNKNOWN 0xFFU
+
+typedef struct {
+    uint8_t op; //operation type
+    char csid[COMM_CSID_LENGTH]; // cam session ID (0x0 means unspecified)
+    uint32_t data_length;
+} application_control_segment_info_t;
+
+typedef struct {
+    union {
+        application_control_segment_info_t info;
+        uint8_t raw[sizeof(application_control_segment_info_t)];
+    } header;
+    uint8_t* pData;
+} application_control_segment_t;
+
+
+
+void __application_control_segment_alloc_data (application_control_segment_t* pSegment) {
+    pSegment->pData = (uint8_t*) malloc(pSegment->header.info.data_length * sizeof(uint8_t));
+}
+
+void __application_control_segment_free_data (application_control_segment_t* pSegment) {
+    free (pSegment->pData);
+}
+
+
+/**
+ * TCP Server
+ * 
+ *  Tasks:
+ *      1. TCP receiver task (writes to queue #1)
+ *      2. TCP transmitter task (reads from queue #2)
+ *      3. rx demultiplexer task (reads from queue #2, writes to queues #3 and #4)
+ * 
+ *  Queues: 
+ *      1. TCP rx queue
+ *      2. TCP tx queue
+ *      3. Client-initiated communications 
+ *      4. Server-initiated communications
+*/
+
+static QueueHandle_t __tcp_rx_queue;
+static QueueHandle_t __tcp_tx_queue;
+static QueueHandle_t __tcp_req_queue;
+static QueueHandle_t __tcp_res_queue;
+
+static SemaphoreHandle_t __tcp_shutdown_semph;
+
+void __tcp_rx_task(void *pvParameters) {
+    
+}
+
+void __tcp_tx_task(void* pvParameters) {
+
+}
+
+void __tcp_demux_task(void* pvParametrs) {
+    
+}
+
+
+
+void tcp_connection_manage_task(void* pvParameters) { //sdvsdv//[TODO NOW] turn into a task <<<
+    __tcp_shutdown_semph = xSemaphoreCreateBinary();
+    if (__tcp_shutdown_semph == NULL) {
+        ESP_LOGE(TAG, "No memory for __tcp_shutdown_semph");
+        //return ESP_ERR_NO_MEM;
+        return;
+    }
+
+    while (1) { // tcp managing infinite loop
+
+        struct sockaddr_in dest_addr;
+        inet_pton(addr_family, host_ip, &dest_addr.sin_addr);
+        dest_addr.sin_family = addr_family;
+        dest_addr.sin_port = htons(TCP_PORT);
+
+        tcp_sock = socket(addr_family, SOCK_STREAM, ip_protocol);
+        if (tcp_sock < 0) {
+            ESP_LOGE(TAG, "Unable to create TCP socket: errno %d", errno);
+            exit(EXIT_FAILURE);
+        }
+        ESP_LOGI(TAG, "Created TCP socket.");
+
+        struct timeval timeout; // @attention check: make sure sockopts can share the same timeout memory
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 100000;
+
+        int rv = setsockopt (tcp_sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout);
+        if (rv < 0) {
+            ESP_LOGE(TAG, "Failed to set tx timeout for tcp.");
+            exit(EXIT_FAILURE);
+        }
+        rv = setsockopt (tcp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+        if (rv < 0) {
+            ESP_LOGE(TAG, "Failed to set rx timeout for tcp.");
+            exit(EXIT_FAILURE);
+        }
+
+        while (1) {
+            rv = connect(tcp_sock, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+            if (rv != 0) {
+                ESP_LOGE(TAG, "Unable to connect TCP socket: errno %d", errno);
+            }
+        }
+        
+        ESP_LOGI(TAG, "TCP socket connected successfully");
+
+        xSemaphoreTake(__tcp_shutdown_semph, portMAX_DELAY);
+
+        if (tcp_sock != -1) {
+            ESP_LOGE(TAG, "Shutting down TCP socket and NOT restarting...");
+            shutdown(tcp_sock, 0);//SHUT_RDWR
+            close(tcp_sock); 
+        }
+
+    } // end of tcp managing infinite loop
+}

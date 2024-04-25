@@ -59,6 +59,7 @@ static const ble_uuid_t* SAU_GATT_REGISTRATION_SERVICE_USER_ID_CHARACTERISTIC_UU
 #define MIN_USER_ID_LENGTH 16
 #define MAX_USER_ID_LENGTH 16
 
+#define CID_LENGTH 16
 #define CKEY_LENGTH 16
 
 typedef enum {
@@ -85,7 +86,7 @@ typedef struct {
     char ckey[CKEY_LENGTH+1];
 } registration_data_t;
 
-typedef registration_network_state_t (*registrationCallback_Function)(registration_data_t* pRegistrationData);
+typedef uint32_t (*registrationCallback_Function)(registration_data_t* pRegistrationData);
 
 int ble_interface_start();
 
@@ -93,6 +94,8 @@ void registration_init(registration_data_t* out_pRegistrationData);
 registration_status_t registration_check_device_registered(registration_data_t* out_pRegistrationData);
 registration_network_state_t registration_check_wifi_credentials_and_connect(const char* ssid, const char* psk);
 
-esp_err_t registration_main(registration_data_t* out_pRegistrationData, registrationCallback_Function registrationCallback);
+esp_err_t registration_main(registration_data_t* out_pRegistrationData, 
+                            registrationCallback_Function registrationNetworkConnectivityCheckCallback, 
+                            registrationCallback_Function registrationServerCommmunicationCallback);
 
 #endif

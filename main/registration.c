@@ -408,6 +408,7 @@ int ble_interface_stop() {
     }
     ESP_LOGI(TAG, "Waiting for complete BLE shutdown...");
     xSemaphoreTake(s_semph_shutdown_ble, portMAX_DELAY);
+    vSemaphoreDelete(s_semph_shutdown_ble);
     return 0;
 }
 
@@ -639,57 +640,75 @@ void ___registration_file_closed_message(FRESULT fr, char* filePath) {
     }
 }
 
-#define rffdFALLBACK(___fr, ___pFil) return (___fr=f_close(___pFil), ___registration_file_closed_message(___fr, REGISTRATION_FILE_PATH), ESP_FAIL)
-#define rffdSUCCEED_DISPOSE(___fr, ___pFil) return (___fr=f_close(___pFil), ___registration_file_closed_message(___fr, REGISTRATION_FILE_PATH), ESP_OK);
+#define registration_fio_FALLBACK(___fr, ___pFil) return (___fr=f_close(___pFil), ___registration_file_closed_message(___fr, REGISTRATION_FILE_PATH), ESP_FAIL)
+#define registration_fio_SUCCEED_DISPOSE(___fr, ___pFil) return (___fr=f_close(___pFil), ___registration_file_closed_message(___fr, REGISTRATION_FILE_PATH), ESP_OK);
 
 esp_err_t ___registration_fio_fetch_data(registration_data_t* out_pRegistrationData) {
-    FIL fil = {}; 
+    FIL fil = {};
     FRESULT fr = FR_OK;
-    f_open(&fil, REGISTRATION_FILE_PATH, FA_READ);
+    fr = f_open(&fil, REGISTRATION_FILE_PATH, FA_READ);
+    if (fr != FR_OK) {
+        ESP_LOGE(TAG, "Failed to open file %s in r mode.", REGISTRATION_FILE_PATH);
+        return ESP_FAIL;
+    }
     UINT ssidLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->pCharacteristics->wifi_ssid, MAX_WIFI_SSID_LENGTH);
     if (ssidLength < MIN_WIFI_SSID_LENGTH || ssidLength > MAX_WIFI_SSID_LENGTH) {
         ESP_LOGE(TAG, "Detected invalid SSID length in %s !", REGISTRATION_FILE_PATH);
         //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
-        rffdFALLBACK(fr, &fil);
+        registration_fio_FALLBACK(fr, &fil);
     }
     UINT pskLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->pCharacteristics->wifi_psk, MAX_WIFI_PSK_LENGTH);
     if (pskLength < MIN_WIFI_PSK_LENGTH || pskLength > MAX_WIFI_PSK_LENGTH) {
         ESP_LOGE(TAG, "Detected invalid PSK length in %s !", REGISTRATION_FILE_PATH);
         //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
-        rffdFALLBACK(fr, &fil);
+        registration_fio_FALLBACK(fr, &fil);
     }
     UINT uidLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->pCharacteristics->user_id, MAX_USER_ID_LENGTH);
     if (uidLength < MIN_USER_ID_LENGTH || uidLength > MAX_USER_ID_LENGTH) {
         ESP_LOGE(TAG, "Detected invalid UID length in %s !", REGISTRATION_FILE_PATH);
         //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
-        rffdFALLBACK(fr, &fil);
+        registration_fio_FALLBACK(fr, &fil);
     }
     
     esp_err_t err = ___registration_fio_read_u32(&fil, &out_pRegistrationData->cam_id);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to read cam_id from %s !", REGISTRATION_FILE_PATH);
         //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
-        rffdFALLBACK(fr, &fil);
+        registration_fio_FALLBACK(fr, &fil);
     }
 
     UINT ckeyLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->ckey, CKEY_LENGTH);
     if (ckeyLength != CKEY_LENGTH) {
         ESP_LOGE(TAG, "Detected invalid ckey length in %s !", REGISTRATION_FILE_PATH);
         //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
-        rffdFALLBACK(fr, &fil);
+        registration_fio_FALLBACK(fr, &fil);
     }
     
     //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_OK);
-    rffdSUCCEED_DISPOSE(fr, &fil);
+    registration_fio_SUCCEED_DISPOSE(fr, &fil);
+}
+
+esp_err_t ___registration_fio_write_data(registration_data_t* pRegistrationData) {
+    FIL fil = {};
+    FRESULT fr = FR_OK;
+    fr = f_open(&fil, REGISTRATION_FILE_PATH, FA_CREATE_NEW | FA_WRITE);
+    if (fr != FR_OK) {
+        ESP_LOGE(TAG, "Failed to open file %s in wx mode.", REGISTRATION_FILE_PATH);
+        return ESP_FAIL;
+    }
+    // [TODO] write structured data to file, close it, check for errors
+
+    return 0;
 }
 
 
-
-
 /**
- * @note registrationCallback will be called each time the client writes to the wifi_psk characteristic
+ * @note registrationNetworkConnectivityCheckCallback will be called each time the client writes to the wifi_psk characteristic
 */
-esp_err_t registration_main(registration_data_t* out_pRegistrationData, registrationCallback_Function registrationCallback) {
+esp_err_t registration_main(registration_data_t* out_pRegistrationData, 
+                            registrationCallback_Function registrationNetworkConnectivityCheckCallback, 
+                            registrationCallback_Function registrationServerCommmunicationCallback) {
+                                
     registration_init(out_pRegistrationData);
 
     struct ___fatfs_helpers fatfsHelpers = {};
@@ -718,7 +737,7 @@ esp_err_t registration_main(registration_data_t* out_pRegistrationData, registra
     }
 
     /*[DEBUG]*/sau_heap_debug_info();
-    ///*[DEBUG]*/memset(out_pRegistrationData->pCharacteristics->wifi_ssid, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_ssid)); memset(out_pRegistrationData->pCharacteristics->wifi_psk, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_psk)); memcpy(out_pRegistrationData->pCharacteristics->wifi_ssid, "ama", strlen("ama")); memcpy(out_pRegistrationData->pCharacteristics->wifi_psk, "2a0m0o3n", strlen("2a0m0o3n")); registrationStatus = DEVICE_REGISTERED; registrationCallback(out_pRegistrationData);
+    ///*[DEBUG]*/memset(out_pRegistrationData->pCharacteristics->wifi_ssid, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_ssid)); memset(out_pRegistrationData->pCharacteristics->wifi_psk, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_psk)); memcpy(out_pRegistrationData->pCharacteristics->wifi_ssid, "ama", strlen("ama")); memcpy(out_pRegistrationData->pCharacteristics->wifi_psk, "2a0m0o3n", strlen("2a0m0o3n")); registrationStatus = DEVICE_REGISTERED; registrationNetworkConnectivityCheckCallback(out_pRegistrationData);
     if (registrationStatus == DEVICE_UNREGISTERED) {
         //Start BLE
         int rv = ble_interface_start();
@@ -745,15 +764,16 @@ esp_err_t registration_main(registration_data_t* out_pRegistrationData, registra
             ESP_LOGI(TAG, "xSemaphoreTake returned (registration semaphore)");
             /*[DEBUG]*/sau_heap_debug_info();
 
-            ///*[DEBUG]*/ memset(out_pRegistrationData->pCharacteristics->wifi_ssid, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_ssid)); memset(out_pRegistrationData->pCharacteristics->wifi_psk, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_psk)); memcpy(out_pRegistrationData->pCharacteristics->wifi_ssid, "ama", strlen("ama")); memcpy(out_pRegistrationData->pCharacteristics->wifi_psk, "2a0m0o3n", strlen("2a0m0o3n")); registrationCallback(out_pRegistrationData); networkState = NETWORK_STATE_WIFI_CONNECTED;
-            networkState = registrationCallback(out_pRegistrationData);
+            ///*[DEBUG]*/ memset(out_pRegistrationData->pCharacteristics->wifi_ssid, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_ssid)); memset(out_pRegistrationData->pCharacteristics->wifi_psk, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_psk)); memcpy(out_pRegistrationData->pCharacteristics->wifi_ssid, "ama", strlen("ama")); memcpy(out_pRegistrationData->pCharacteristics->wifi_psk, "2a0m0o3n", strlen("2a0m0o3n")); registrationNetworkConnectivityCheckCallback(out_pRegistrationData); networkState = NETWORK_STATE_WIFI_CONNECTED;
+            networkState = registrationNetworkConnectivityCheckCallback(out_pRegistrationData);
             ///*[debug]*/ networkState = wifi_connect(out_pRegistrationData->pCharacteristics->wifi_ssid, out_pRegistrationData->pCharacteristics->wifi_psk) == ESP_OK;
             sau_gatt_registration_service_chr_values.network_state = (uint8_t)networkState;
             /*[DEBUG]*/sau_heap_debug_info();
             notify_ble_central();
             /*[DEBUG]*/sau_heap_debug_info();
         } while(networkState == NETWORK_STATE_WIFI_DISCONNECTED);
-        
+
+        vSemaphoreDelete(s_semph_get_registration);
         if (networkState != NETWORK_STATE_WIFI_CONNECTED) {
             ESP_LOGE(TAG, "Unexpected registration network state.");
             return ESP_FAIL;
@@ -769,15 +789,17 @@ esp_err_t registration_main(registration_data_t* out_pRegistrationData, registra
         
         ESP_LOGI(TAG, "After ble shutdown");
         /*[DEBUG]*/sau_heap_debug_info();
+
+
+        //TCP connection to server [TODO]
         
+        //Write registration data to file [TODO]
+
     } else {
         //fetch registration data from file [TODO]
-        // call registrationCallback (connect WiFi) [TODO]
+        // call registrationNetworkConnectivityCheckCallback (connect WiFi) [TODO]
     }
     /*[debug]*/sau_heap_debug_info();
-
-    //TCP connection to server [TODO]
-    //Write registration data to file [TODO]
 
     err = ___registration_fatfs_deinit(&fatfsHelpers);
     if (err != ESP_OK) {

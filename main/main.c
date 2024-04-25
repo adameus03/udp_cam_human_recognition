@@ -11,10 +11,16 @@
 
 static const char *TAG = "main";
 
-registration_network_state_t app_registration_handler(registration_data_t* pRegistrationData) {
+registration_network_state_t app_registration_network_connectivity_check_handler(registration_data_t* pRegistrationData) {
     // Check network connection
+    //ffsd//[TODO NOW] Start TCP serv task if successfull???
     return wifi_connect(pRegistrationData->pCharacteristics->wifi_ssid, pRegistrationData->pCharacteristics->wifi_psk) == ESP_OK;
     //return NETWORK_STATE_WIFI_DISCONNECTED;
+}
+
+uint32_t app_registration_server_communication_callback(registration_data_t* pRegistrationData) {
+    // [TODO] trigger a communication to get cam_id and ckey from server
+    return 0;
 }
 
 void app_main(void)
@@ -40,7 +46,7 @@ void app_main(void)
     //vTaskPrioritySet(NULL, 5);//set the priority of the main task to 5 ? 
     
     registration_data_t registrationData = {};
-    /*err = ESP_OK;[debug]*/err = registration_main(&registrationData, app_registration_handler);
+    /*err = ESP_OK;[debug]*/err = registration_main(&registrationData, app_registration_network_connectivity_check_handler, app_registration_server_communication_callback);
     //ESP_ERROR_CHECK(wifi_connect("ama", "2a0m0o3n")); //[debug]
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "registration_main returned error code [%d]", err);
