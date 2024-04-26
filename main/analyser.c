@@ -32,7 +32,7 @@ void analyser_run(uint32_t usStackDepth) {
     ESP_LOGI(TAG, "Going to allocate stack for task analyser_task, needed heap memory block: %lu", usStackDepth);
 
     // Create the analyser task on core 1
-    xTaskCreatePinnedToCore(__analyser_task, "analyser_task", usStackDepth, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(__analyser_task, "analyser_task", usStackDepth, NULL, 5, NULL, 1); // [TODO] Really?
     //__analyser_task(NULL);
 }
 

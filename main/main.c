@@ -11,15 +11,38 @@
 
 static const char *TAG = "main";
 
+TaskHandle_t tcp_connection_manage_task_handle = NULL;
+TaskHandle_t tcp_app_incoming_request_handler_task_handle = NULL;
+
 registration_network_state_t app_registration_network_connectivity_check_handler(registration_data_t* pRegistrationData) {
     // Check network connection
     //ffsd//[TODO NOW] Start TCP serv task if successfull???
-    return wifi_connect(pRegistrationData->pCharacteristics->wifi_ssid, pRegistrationData->pCharacteristics->wifi_psk) == ESP_OK;
+    esp_err_t wifi_conn_err = wifi_connect(pRegistrationData->pCharacteristics->wifi_ssid, pRegistrationData->pCharacteristics->wifi_psk);
+    
+    if (wifi_conn_err == ESP_OK) {
+        ESP_LOGI(TAG, "Creating task 'tcp_conection_manager'");
+        if (pdPASS != xTaskCreate( tcp_connection_manage_task_handle, "tcp_conection_manager", 4096, NULL, 1, &tcp_connection_manage_task_handle)) {
+            ESP_LOGE(TAG, "Failed to create the tcp_conection_manager task.");
+            exit(EXIT_FAILURE); // [TODO] Does this make esp32 reset or not?
+        }
+        ESP_LOGI(TAG, "Creating task 'tcp_app_incoming_request_handler'");
+        if (pdPASS != xTaskCreate( tcp_app_incoming_request_handler_task_handle, "tcp_app_incoming_request_handler", 4096, NULL, 1, &tcp_app_incoming_request_handler_task_handle)) {
+            ESP_LOGE(TAG, "Failed to create the tcp_app_incoming_request_handler task.");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    ESP_LOGI(TAG, "%s", wifi_conn_err == ESP_OK ? "Netconn check pass" : "Netconn check fail");
+    
+    return wifi_conn_err == ESP_OK;
     //return NETWORK_STATE_WIFI_DISCONNECTED;
 }
 
 uint32_t app_registration_server_communication_callback(registration_data_t* pRegistrationData) {
     // [TODO] trigger a communication to get cam_id and ckey from server
+    // Call tcp_app_handle_registration
+
+
     return 0;
 }
 

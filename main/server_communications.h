@@ -30,3 +30,7 @@ extern void x_on_udp_transmission_end();
 
 //void setup_and_manage_tcp_connection();
 void tcp_connection_manage_task(void* pvParameters);
+void tcp_app_incoming_request_handler_task(void* pvParameters);
+
+void tcp_app_handle_registration_1(char* pcUid_in, uint8_t* puMac_in, char** ppcCid_out);
+//void tcp_app_send()

@@ -797,7 +797,7 @@ esp_err_t registration_main(registration_data_t* out_pRegistrationData,
 
     } else {
         //fetch registration data from file [TODO]
-        // call registrationNetworkConnectivityCheckCallback (connect WiFi) [TODO]
+        // call registrationNetworkConnectivityCheckCallback (connect WiFi) [TODO] // Check connectivity in loop until connection is obtained? Or fallback to registration (probably not)
     }
     /*[debug]*/sau_heap_debug_info();
 
