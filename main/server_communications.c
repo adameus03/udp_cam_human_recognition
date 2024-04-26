@@ -424,8 +424,8 @@ typedef union { // op = APP_CONTROL_OP_GET_DEVICE_INFO
         1 - response
 */
 
-#define REQUEST(op) (op)
-#define RESPONSE(op) (op) | (1U << 7) 
+#define OP_DIR_REQUEST(op) ((op) & ~(1U << 7)) 
+#define OP_DIR_RESPONSE(op) ((op) | (1U << 7))
 
 typedef struct {
     char csid[COMM_CSID_LENGTH]; // cam session ID (zeroed-out means unspecified)
@@ -486,6 +486,12 @@ static QueueHandle_t __tcp_res_queue;
 
 static SemaphoreHandle_t __tcp_shutdown_semph;
 
+void reset_tcp_conn() {
+    if(xSemaphoreGive(__tcp_shutdown_semph) != pdTRUE) { // reset connection
+        ESP_LOGE(TAG, "xSemaphoreGive(__tcp_shutdown_semph) failed");
+        exit(EXIT_FAILURE);
+    }
+}
 
 void __tcp_rx_task(void *pvParameters) {
     while (1) {
@@ -497,15 +503,15 @@ void __tcp_rx_task(void *pvParameters) {
                 rv = recv(tcp_sock, seg.data, seg.header.info.data_length, 0);
                 if (rv == seg.header.info.data_length) {
                     
-                    int result = xQueueSend(__tcp_rx_queue, seg.raw, 0); // pass application segment to the rx queue
+                    int result = xQueueSend(__tcp_rx_queue, &seg, 0); // pass application segment to the rx queue
                     
                     if (result != pdTRUE){
                         if (result == errQUEUE_FULL) {
                             ESP_LOGE(TAG, "Trying to send to the __tcp_rx_queue queue which is full!");
                         } else {
-                            ESP_LOGE(TAG, "xQueueSend(__tcp_rx_queue, seg.raw, 0) failed, [ret val: %d]", result);
+                            ESP_LOGE(TAG, "xQueueSend(__tcp_rx_queue, &seg, 0) failed, [ret val: %d]", result);
                         }
-                        xSemaphoreGive(__tcp_shutdown_semph); // reset connection
+                        reset_tcp_conn();
                     } else {
                         ESP_LOGI(TAG, "Application control segment received into the RX queue.");
                     }
@@ -521,7 +527,7 @@ void __tcp_rx_task(void *pvParameters) {
                     } else {
                         ESP_LOGE(TAG, "Error while receiving from TCP socket (trying to receive app seg data bytes) [errno = %d]", errno);
                     }
-                    xSemaphoreGive(__tcp_shutdown_semph); // reset connection
+                    reset_tcp_conn();
                 }
                 
             }
@@ -537,7 +543,7 @@ void __tcp_rx_task(void *pvParameters) {
             } else {
                 ESP_LOGE(TAG, "Error while receiving from TCP socket (trying to receive app seg header bytes) [errno = %d]", errno);
             }
-            xSemaphoreGive(__tcp_shutdown_semph); // reset connection
+            reset_tcp_conn();
         }
     }
 }
@@ -545,7 +551,7 @@ void __tcp_rx_task(void *pvParameters) {
 void __tcp_tx_task(void* pvParameters) {
     while (1) {
         application_control_segment_t seg = {}; //skip segment init?
-        if (xQueueReceive(__tcp_tx_queue, seg.raw, 0)) {
+        if (xQueueReceive(__tcp_tx_queue, &seg, 0)) {
             
             uint32_t tx_seg_len = sizeof(application_control_segment_info_t) + seg.header.info.data_length;
             ssize_t rv = send(tcp_sock, seg.raw, (size_t)tx_seg_len, 0);
@@ -563,18 +569,42 @@ void __tcp_tx_task(void* pvParameters) {
                 } else {
                     ESP_LOGE(TAG, "Error while transmitting to TCP socket [errno = %d]", errno);
                 }
-                xSemaphoreGive(__tcp_shutdown_semph); // reset connection
+                reset_tcp_conn();
             }
         } else {
             ESP_LOGE(TAG, "Failure while receiving from the __tcp_tx_queue queue");
-            xSemaphoreGive(__tcp_shutdown_semph); // reset connection
         }
     }
 }
 
 void __tcp_demux_task(void* pvParametrs) {
     while (1) {
-        ESP_LOGE(TAG, "Not implemented");
+        application_control_segment_t seg = {}; //skip segment init?
+        if (xQueueReceive(__tcp_rx_queue, &seg, 0)) {
+            QueueHandle_t targetQueueHandle = NULL;
+            if (seg.header.info.op == OP_DIR_REQUEST(seg.header.info.op)) {
+                targetQueueHandle = __tcp_req_queue;
+            } else {
+                targetQueueHandle = __tcp_res_queue;
+            }
+            int result = xQueueSend(targetQueueHandle, &seg, 0);
+            if (result != pdTRUE){
+                if (result == errQUEUE_FULL) {
+                    ESP_LOGE(TAG, "%s", targetQueueHandle == __tcp_req_queue ? "Trying to send to request queue which is full!" : "Trying to send to response queue which is full!");
+                } else {
+                    if (targetQueueHandle == __tcp_req_queue) {
+                        ESP_LOGE(TAG, "xQueueSend(__tcp_req_queue, seg.raw, 0) failed, [ret val: %d]", result);
+                    } else {
+                        ESP_LOGE(TAG, "xQueueSend(__tcp_res_queue, seg.raw, 0) failed, [ret val: %d]", result);
+                    }
+                }
+                reset_tcp_conn();
+            } else {
+                ESP_LOGI(TAG, "%s", targetQueueHandle == __tcp_req_queue ? "Successfully demultiplexed an application segment into the request queue." : "Successfully demultiplexed an application segment into the response queue.");
+            }
+        } else {
+            ESP_LOGE(TAG, "Failure while receiving from the __tcp_tx_queue queue");
+        }
     }
 }
 
