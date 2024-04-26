@@ -418,11 +418,17 @@ typedef union { // op = APP_CONTROL_OP_GET_DEVICE_INFO
 #define APP_CONTROL_OP_GET_DEVICE_INFO 0x12U
 #define APP_CONTROL_OP_UNKNOWN 0x7FU
 
+/*
+    The MSB bit of op specified in segment header indicates whether it's request or response
+        0 - request
+        1 - response
+*/
+
 #define REQUEST(op) (op)
-#define RESPONSE(op) (op) & (1U << 7)
+#define RESPONSE(op) (op) | (1U << 7) 
 
 typedef struct {
-    char csid[COMM_CSID_LENGTH]; // cam session ID (0x0 means unspecified)
+    char csid[COMM_CSID_LENGTH]; // cam session ID (zeroed-out means unspecified)
     uint32_t data_length;
     uint8_t op; //operation type
 } __attribute__((packed)) application_control_segment_info_t; //size = 21
