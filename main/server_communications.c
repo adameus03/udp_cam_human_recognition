@@ -416,7 +416,10 @@ typedef union { // op = APP_CONTROL_OP_GET_DEVICE_INFO
 #define APP_CONTROL_OP_OTA 0x10U // OTA Firmware update
 #define APP_CONTROL_OP_SOFTWARE_DEVICE_RESET 0x11U // Trigger device software reset
 #define APP_CONTROL_OP_GET_DEVICE_INFO 0x12U
-#define APP_CONTROL_OP_UNKNOWN 0xFFU
+#define APP_CONTROL_OP_UNKNOWN 0x7FU
+
+#define REQUEST(op) (op)
+#define RESPONSE(op) (op) & (1U << 7)
 
 typedef struct {
     char csid[COMM_CSID_LENGTH]; // cam session ID (0x0 means unspecified)
@@ -480,7 +483,7 @@ static SemaphoreHandle_t __tcp_shutdown_semph;
 
 void __tcp_rx_task(void *pvParameters) {
     while (1) {
-        application_control_segment_t seg = {}; // [TODO] verify if xQueueSend copies it (it should as docs say so), otherwise move it outside the loop
+        application_control_segment_t seg = {}; // [TODO] verify if xQueueSend copies its raw buffer (it should as docs say so), otherwise move it outside the loop
                                                 // also, skip segment init?
         ssize_t rv = recv(tcp_sock, seg.header.raw, sizeof(seg.header), 0);
         if (rv == sizeof(seg.header)) {
@@ -488,15 +491,17 @@ void __tcp_rx_task(void *pvParameters) {
                 rv = recv(tcp_sock, seg.data, seg.header.info.data_length, 0);
                 if (rv == seg.header.info.data_length) {
                     
-                    int result = xQueueSend(__tcp_rx_queue, &seg, 0); // pass application segment to the rx queue
+                    int result = xQueueSend(__tcp_rx_queue, seg.raw, 0); // pass application segment to the rx queue
                     
                     if (result != pdTRUE){
                         if (result == errQUEUE_FULL) {
                             ESP_LOGE(TAG, "Trying to send to the __tcp_rx_queue queue which is full!");
                         } else {
-                            ESP_LOGE(TAG, "xQueueSend(__tcp_rx_queue, &seg, 0) failed, [ret val: %d]", result);
+                            ESP_LOGE(TAG, "xQueueSend(__tcp_rx_queue, seg.raw, 0) failed, [ret val: %d]", result);
                         }
                         xSemaphoreGive(__tcp_shutdown_semph); // reset connection
+                    } else {
+                        ESP_LOGI(TAG, "Application control segment received into the RX queue.");
                     }
                 } else {
                     if (rv == 0) {
@@ -507,6 +512,8 @@ void __tcp_rx_task(void *pvParameters) {
                         } else {
                             ESP_LOGE(TAG, "Unexpectedly received more data bytes than expected seg data length!");
                         }
+                    } else {
+                        ESP_LOGE(TAG, "Error while receiving from TCP socket (trying to receive app seg data bytes) [errno = %d]", errno);
                     }
                     xSemaphoreGive(__tcp_shutdown_semph); // reset connection
                 }
@@ -522,7 +529,7 @@ void __tcp_rx_task(void *pvParameters) {
                     ESP_LOGE(TAG, "Unexpectedly received more header bytes than expected header length!");
                 }
             } else {
-                ESP_LOGE(TAG, "Error while trying to receive header bytes (code: %d)", rv);
+                ESP_LOGE(TAG, "Error while receiving from TCP socket (trying to receive app seg header bytes) [errno = %d]", errno);
             }
             xSemaphoreGive(__tcp_shutdown_semph); // reset connection
         }
@@ -532,17 +539,41 @@ void __tcp_rx_task(void *pvParameters) {
 void __tcp_tx_task(void* pvParameters) {
     while (1) {
         application_control_segment_t seg = {}; //skip segment init?
-        ESP_LOGE(TAG, "Not implemented");
-
+        if (xQueueReceive(__tcp_tx_queue, seg.raw, 0)) {
+            
+            uint32_t tx_seg_len = sizeof(application_control_segment_info_t) + seg.header.info.data_length;
+            ssize_t rv = send(tcp_sock, seg.raw, (size_t)tx_seg_len, 0);
+            if (rv == tx_seg_len) {
+                ESP_LOGI(TAG, "Application control segment from the TX queue was transmitted successfully.");
+            } else {
+                if (rv == 0) {
+                    ESP_LOGE(TAG, "No segment bytes were transmitted for some reason.");
+                } else if (rv > 0) {
+                    if (rv < tx_seg_len) {
+                        ESP_LOGE(TAG, "Transmitted incomplete app control segment!");
+                    } else {
+                        ESP_LOGE(TAG, "Unexpectedly transmitted more bytes than the size of the target app control segment!");
+                    }
+                } else {
+                    ESP_LOGE(TAG, "Error while transmitting to TCP socket [errno = %d]", errno);
+                }
+                xSemaphoreGive(__tcp_shutdown_semph); // reset connection
+            }
+        } else {
+            ESP_LOGE(TAG, "Failure while receiving from the __tcp_tx_queue queue");
+            xSemaphoreGive(__tcp_shutdown_semph); // reset connection
+        }
     }
 }
 
 void __tcp_demux_task(void* pvParametrs) {
-    
+    while (1) {
+        ESP_LOGE(TAG, "Not implemented");
+    }
 }
 
 
-void tcp_connection_manage_task(void* pvParameters) {
+void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
     __tcp_shutdown_semph = xSemaphoreCreateBinary();
     if (__tcp_shutdown_semph == 0) {
         ESP_LOGE(TAG, "No memory for __tcp_shutdown_semph");
