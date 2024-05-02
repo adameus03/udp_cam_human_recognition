@@ -36,7 +36,12 @@
         "esp_heap_caps.h": "c",
         "array": "c",
         "string": "c",
-        "string_view": "c"
+        "string_view": "c",
+        "sockets.h": "c",
+        "registration.h": "c",
+        "ble_uuid.h": "c",
+        "freertos.h": "c",
+        "esp_transport.h": "c"
     },
     "idf.flashType": "UART"
 }

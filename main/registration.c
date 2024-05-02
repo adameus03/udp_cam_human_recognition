@@ -7,6 +7,7 @@
 #include "services/gatt/ble_svc_gatt.h"
 
 #include "nvs_flash.h" //
+#include "esp_random.h"
 
 //#include "nimble"
 #include "esp_log.h"
@@ -670,10 +671,17 @@ esp_err_t ___registration_fio_fetch_data(registration_data_t* out_pRegistrationD
         registration_fio_FALLBACK(fr, &fil);
     }
     
-    esp_err_t err = ___registration_fio_read_u32(&fil, &out_pRegistrationData->cam_id);
+    /*esp_err_t err = ___registration_fio_read_u32(&fil, &out_pRegistrationData->cam_id);
+    
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to read cam_id from %s !", REGISTRATION_FILE_PATH);
         //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
+        registration_fio_FALLBACK(fr, &fil);
+    }*/
+
+    UINT cidLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->cam_id, CID_LENGTH);
+    if (cidLength != CID_LENGTH) {
+        ESP_LOGE(TAG, "Detected invalid cid length in %s !", REGISTRATION_FILE_PATH);
         registration_fio_FALLBACK(fr, &fil);
     }
 
@@ -701,6 +709,12 @@ esp_err_t ___registration_fio_write_data(registration_data_t* pRegistrationData)
     return 0;
 }
 
+static void __semph_operation_assert_success(int result, char* pcSemphOpName) {
+    if (result != pdTRUE) {
+        ESP_LOGE(TAG, "%s failed.", pcSemphOpName);
+        assert(0);
+    }
+}
 
 /**
  * @note registrationNetworkConnectivityCheckCallback will be called each time the client writes to the wifi_psk characteristic
@@ -760,12 +774,12 @@ esp_err_t registration_main(registration_data_t* out_pRegistrationData,
         registration_network_state_t networkState = NETWORK_STATE_WIFI_DISCONNECTED;
         do {
             ESP_LOGI(TAG, "Waiting for mobile app registration...");
-            xSemaphoreTake(s_semph_get_registration, portMAX_DELAY);
+            __semph_operation_assert_success(xSemaphoreTake(s_semph_get_registration, portMAX_DELAY), "xSemaphoreTake");
             ESP_LOGI(TAG, "xSemaphoreTake returned (registration semaphore)");
             /*[DEBUG]*/sau_heap_debug_info();
 
             ///*[DEBUG]*/ memset(out_pRegistrationData->pCharacteristics->wifi_ssid, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_ssid)); memset(out_pRegistrationData->pCharacteristics->wifi_psk, 0, sizeof(out_pRegistrationData->pCharacteristics->wifi_psk)); memcpy(out_pRegistrationData->pCharacteristics->wifi_ssid, "ama", strlen("ama")); memcpy(out_pRegistrationData->pCharacteristics->wifi_psk, "2a0m0o3n", strlen("2a0m0o3n")); registrationNetworkConnectivityCheckCallback(out_pRegistrationData); networkState = NETWORK_STATE_WIFI_CONNECTED;
-            networkState = registrationNetworkConnectivityCheckCallback(out_pRegistrationData);
+            networkState = registrationNetworkConnectivityCheckCallback(out_pRegistrationData, NULL);
             ///*[debug]*/ networkState = wifi_connect(out_pRegistrationData->pCharacteristics->wifi_ssid, out_pRegistrationData->pCharacteristics->wifi_psk) == ESP_OK;
             sau_gatt_registration_service_chr_values.network_state = (uint8_t)networkState;
             /*[DEBUG]*/sau_heap_debug_info();
@@ -791,9 +805,22 @@ esp_err_t registration_main(registration_data_t* out_pRegistrationData,
         /*[DEBUG]*/sau_heap_debug_info();
 
 
-        //TCP connection to server [TODO]
+        //TCP connection to server
+        SemaphoreHandle_t s_semph_serv_comm_callback_sync = xSemaphoreCreateBinary();
+        registrationServerCommmunicationCallback(out_pRegistrationData, s_semph_serv_comm_callback_sync);
         
-        //Write registration data to file [TODO]
+        //Generate ckey
+        esp_fill_random(out_pRegistrationData->ckey, CKEY_LENGTH); // Hardware RNG
+
+        ESP_LOGI(TAG, "Waiting for first stage registration communication completion...");
+        __semph_operation_assert_success(xSemaphoreTake(s_semph_serv_comm_callback_sync, portMAX_DELAY), "xSemaphoreTake"); // Wait for server communication callback first stage completion
+        //Write registration data to file
+        ESP_LOGI(TAG, "Writing registration data to file...");
+        ESP_LOGE(TAG, "Not implemented."); assert(0); // [TODO]
+
+        __semph_operation_assert_success(xSemaphoreGive(s_semph_serv_comm_callback_sync), "xSemaphoreGive"); // Signal server communication callback to proceed
+        __semph_operation_assert_success(xSemaphoreTake(s_semph_serv_comm_callback_sync, portMAX_DELAY), "xSemaphoreTake"); // Wait for server communication callback to finish
+        vSemaphoreDelete(s_semph_serv_comm_callback_sync);
 
     } else {
         //fetch registration data from file [TODO]

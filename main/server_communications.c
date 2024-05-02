@@ -504,13 +504,13 @@ void __tcp_rx_task(void *pvParameters) {
                 rv = recv(tcp_sock, seg.data, seg.header.info.data_length, 0);
                 if (rv == seg.header.info.data_length) {
                     
-                    int result = xQueueSend(__tcp_rx_queue, &seg, 0); // pass application segment to the rx queue
+                    int result = xQueueSend(__tcp_rx_queue, &seg, portMAX_DELAY); // pass application segment to the rx queue
                     
                     if (result != pdTRUE){
                         if (result == errQUEUE_FULL) {
                             ESP_LOGE(TAG, "Trying to send to the __tcp_rx_queue queue which is full!");
                         } else {
-                            ESP_LOGE(TAG, "xQueueSend(__tcp_rx_queue, &seg, 0) failed, [ret val: %d]", result);
+                            ESP_LOGE(TAG, "xQueueSend(__tcp_rx_queue, &seg, portMAX_DELAY) failed, [ret val: %d]", result);
                         }
                         exit(EXIT_FAILURE);
                     } else {
@@ -552,7 +552,7 @@ void __tcp_rx_task(void *pvParameters) {
 void __tcp_tx_task(void* pvParameters) {
     while (1) {
         application_control_segment_t seg = {}; //skip segment init?
-        if (xQueueReceive(__tcp_tx_queue, &seg, 0)) {
+        if (xQueueReceive(__tcp_tx_queue, &seg, portMAX_DELAY)) {
             
             uint32_t tx_seg_len = sizeof(application_control_segment_info_t) + seg.header.info.data_length;
             ssize_t rv = send(tcp_sock, seg.raw, (size_t)tx_seg_len, 0);
@@ -581,22 +581,22 @@ void __tcp_tx_task(void* pvParameters) {
 void __tcp_demux_task(void* pvParametrs) {
     while (1) {
         application_control_segment_t seg = {}; //skip segment init?
-        if (xQueueReceive(__tcp_rx_queue, &seg, 0)) {
+        if (xQueueReceive(__tcp_rx_queue, &seg, portMAX_DELAY)) {
             QueueHandle_t targetQueueHandle = NULL;
             if (seg.header.info.op == OP_DIR_REQUEST(seg.header.info.op)) {
                 targetQueueHandle = __tcp_req_queue;
             } else {
                 targetQueueHandle = __tcp_res_queue;
             }
-            int result = xQueueSend(targetQueueHandle, &seg, 0);
+            int result = xQueueSend(targetQueueHandle, &seg, portMAX_DELAY);
             if (result != pdTRUE){
                 if (result == errQUEUE_FULL) {
                     ESP_LOGE(TAG, "%s", targetQueueHandle == __tcp_req_queue ? "Trying to send to request queue which is full!" : "Trying to send to response queue which is full!");
                 } else {
                     if (targetQueueHandle == __tcp_req_queue) {
-                        ESP_LOGE(TAG, "xQueueSend(__tcp_req_queue, seg.raw, 0) failed, [ret val: %d]", result);
+                        ESP_LOGE(TAG, "xQueueSend(__tcp_req_queue, seg.raw, portMAX_DELAY) failed, [ret val: %d]", result);
                     } else {
-                        ESP_LOGE(TAG, "xQueueSend(__tcp_res_queue, seg.raw, 0) failed, [ret val: %d]", result);
+                        ESP_LOGE(TAG, "xQueueSend(__tcp_res_queue, seg.raw, portMAX_DELAY) failed, [ret val: %d]", result);
                     }
                 }
                 reset_tcp_conn();
@@ -679,7 +679,8 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
             if (rv == 0) {
                 break;
             } else  {
-                ESP_LOGE(TAG, "Unable to connect TCP socket: errno %d", errno);
+                ESP_LOGE(TAG, "Unable to connect TCP socket: errno %d; Waiting 3 seconds...", errno);
+                vTaskDelay(3000 / portTICK_PERIOD_MS);
             }
         }
         
@@ -701,7 +702,8 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
 
 void tcp_app_incoming_request_handler_task(void* pvParameters) {
     while (1) {
-        ESP_LOGE(TAG, "Not implemented");
+        ESP_LOGE(TAG, "tcp_app_incoming_request_handler_task is not implemented!");
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
 
@@ -719,16 +721,27 @@ void application_registration_section_set_dev_mac(application_registration_secti
     memcpy(pSection->dev_mac, puMac, COMM_NETIF_WIFI_STA_MAC_ADDR_LENGTH);
 }
 
-static void __queue_operation_assert_success(int result, char* pcQueueName, char* pcSuccessMessage) {
+void application_registration_section_set_ckey(application_registration_section_t* pSection, char* ckey) {
+    memcpy(pSection->ckey, ckey, CKEY_LENGTH);
+}
+
+static void __queue_operation_assert_success(int result, char* pcQueueName, char* pcQueueOpName, char* pcSuccessMessage) {
     if (result != pdTRUE){
-        if (result == errQUEUE_FULL) {
-            ESP_LOGE(TAG, "Trying to send to the %s queue which is full!", pcQueueName);
+        if (result == 0) {
+            ESP_LOGE(TAG, "Trying to send/receive to/from the %s queue which is full/empty!", pcQueueName);
         } else {
-            ESP_LOGE(TAG, "xQueueSend failed for %s, [ret val: %d]", pcQueueName, result);
+            ESP_LOGE(TAG, "%s failed for %s, [ret val: %d]", pcQueueOpName, pcQueueName, result);
         }
         exit(EXIT_FAILURE);
     } else {
         ESP_LOGI(TAG, "%s", pcSuccessMessage);
+    }
+}
+
+static void __semph_operation_assert_success(int result, char* pcSemphOpName) {
+    if (result != pdTRUE) {
+        ESP_LOGE(TAG, "%s failed.", pcSemphOpName);
+        assert(0);
     }
 }
 
@@ -743,20 +756,22 @@ static void __buffer_assert_exists_nonzero_byte(char* buf, size_t len, char* err
 }
 
 void __tcp_app_send_control_segment(application_control_segment_t* pSegment) {
-    int result = xQueueSend(__tcp_tx_queue, pSegment, 0);
-    __queue_operation_assert_success(result, "__tcp_tx_queue", "Application control segment queued to the __tcp_tx_queue queue.");
+    int result = xQueueSend(__tcp_tx_queue, pSegment, portMAX_DELAY);
+    __queue_operation_assert_success(result, "__tcp_tx_queue", "xQueueSend", "Application control segment queued to the __tcp_tx_queue queue.");
 }
 
 /**
  * Send application request to the server and await the response
 */
 void tcp_app_request(application_control_segment_t* pControlSegment) {
+    ESP_LOGI(TAG, "Sending application control segment to server");
     __tcp_app_send_control_segment(pControlSegment);
-    int result = xQueueReceive(__tcp_res_queue, pControlSegment->raw, 0);
-    __queue_operation_assert_success(result, "__tcp_res_queue", "Received a request from the server");
+    ESP_LOGI(TAG, "Waiting for server response...");
+    int result = xQueueReceive(__tcp_res_queue, pControlSegment->raw, portMAX_DELAY);
+    __queue_operation_assert_success(result, "__tcp_res_queue", "xQueueReceive", "Received a request from the server.");
 }
 
-void tcp_app_handle_registration_1(char* pcUid_in, uint8_t* puMac_in, char** ppcCid_out) {
+void tcp_app_handle_registration(char* pcUid_in, char** ppcCid_out, char** ppcCkey_in, SemaphoreHandle_t semphSync) {
     uint8_t mac[COMM_NETIF_WIFI_STA_MAC_ADDR_LENGTH];
     misc_get_netif_mac_wifi(mac);
 
@@ -776,10 +791,18 @@ void tcp_app_handle_registration_1(char* pcUid_in, uint8_t* puMac_in, char** ppc
 
     application_control_segment_set_data (&seg, registrationSection.raw);
     
-    tcp_app_request(&seg);
+    tcp_app_request(&seg); // passes UID, mac to server ; obtains CID from server
 
     char* cid = ((application_registration_section_t*)seg.data)->cid;
     __buffer_assert_exists_nonzero_byte(cid, CID_LENGTH, "Server was expected to generate a valid CID, but they seem to have failed");
 
-    ESP_LOGE(TAG, "Not implemented");
+    __semph_operation_assert_success(xSemaphoreGive(semphSync), "xSemaphoreGive"); //indicate end of first stage
+    __semph_operation_assert_success(xSemaphoreTake(semphSync, portMAX_DELAY), "xSemaphoreGive"); // wait for registration activities (storage of CID, generating ckey...)
+    
+    seg.header.info.op = OP_DIR_REQUEST(seg.header.info.op);
+    application_registration_section_set_ckey ((application_registration_section_t*)seg.data, *ppcCkey_in);
+    
+    tcp_app_request(&seg); // passes CKEY to server ; obtains confirmation (any valid response) from 
+    
+    __semph_operation_assert_success(xSemaphoreGive(semphSync), "xSemaphoreGive"); // indicate end of registration communications
 }

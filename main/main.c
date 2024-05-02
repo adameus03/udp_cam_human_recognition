@@ -8,25 +8,26 @@
 #include "camau_controller.h" // ENABLE THIS
 
 #include "registration.h"
+#include "server_communications.h"
 
 static const char *TAG = "main";
 
 TaskHandle_t tcp_connection_manage_task_handle = NULL;
 TaskHandle_t tcp_app_incoming_request_handler_task_handle = NULL;
 
-registration_network_state_t app_registration_network_connectivity_check_handler(registration_data_t* pRegistrationData) {
+registration_network_state_t app_registration_network_connectivity_check_handler(registration_data_t* pRegistrationData, SemaphoreHandle_t semphSync) {
     // Check network connection
     //ffsd//[TODO NOW] Start TCP serv task if successfull???
     esp_err_t wifi_conn_err = wifi_connect(pRegistrationData->pCharacteristics->wifi_ssid, pRegistrationData->pCharacteristics->wifi_psk);
     
     if (wifi_conn_err == ESP_OK) {
         ESP_LOGI(TAG, "Creating task 'tcp_conection_manager'");
-        if (pdPASS != xTaskCreate( tcp_connection_manage_task_handle, "tcp_conection_manager", 4096, NULL, 1, &tcp_connection_manage_task_handle)) {
+        if (pdPASS != xTaskCreate( tcp_connection_manage_task, "tcp_conection_manager", 4096, NULL, 1, &tcp_connection_manage_task_handle)) {
             ESP_LOGE(TAG, "Failed to create the tcp_conection_manager task.");
             exit(EXIT_FAILURE); // [TODO] Does this make esp32 reset or not?
         }
         ESP_LOGI(TAG, "Creating task 'tcp_app_incoming_request_handler'");
-        if (pdPASS != xTaskCreate( tcp_app_incoming_request_handler_task_handle, "tcp_app_incoming_request_handler", 4096, NULL, 1, &tcp_app_incoming_request_handler_task_handle)) {
+        if (pdPASS != xTaskCreate( tcp_app_incoming_request_handler_task, "tcp_app_incoming_request_handler", 4096, NULL, 1, &tcp_app_incoming_request_handler_task_handle)) {
             ESP_LOGE(TAG, "Failed to create the tcp_app_incoming_request_handler task.");
             exit(EXIT_FAILURE);
         }
@@ -38,10 +39,33 @@ registration_network_state_t app_registration_network_connectivity_check_handler
     //return NETWORK_STATE_WIFI_DISCONNECTED;
 }
 
-uint32_t app_registration_server_communication_callback(registration_data_t* pRegistrationData) {
+typedef struct {
+    char* pcUid_in; char** ppcCid_out; char** ppcCkey_in; SemaphoreHandle_t semphSync;
+} __registrationServerCommunicationCallback_params_t;
+
+void __registrationServerCommmunicationCallback_task(void* pvParameters) {
+    __registrationServerCommunicationCallback_params_t* pParams = pvParameters;
+    tcp_app_handle_registration(pParams->pcUid_in, pParams->ppcCid_out, pParams->ppcCkey_in, pParams->semphSync);
+    vTaskDelete(NULL);
+}
+
+TaskHandle_t registrationServerCommmunication_callback_task_handle = NULL;
+
+uint32_t app_registration_server_communication_callback(registration_data_t* pRegistrationData, SemaphoreHandle_t semphSync) {
     // [TODO] trigger a communication to get cam_id and ckey from server
     // Call tcp_app_handle_registration
+    __registrationServerCommunicationCallback_params_t params = {
+        .pcUid_in = pRegistrationData->pCharacteristics->user_id,
+        .ppcCid_out = (char**)pRegistrationData->cam_id,
+        .ppcCkey_in = (char**)pRegistrationData->ckey,
+        .semphSync = semphSync
+    };
 
+    ESP_LOGI(TAG, "Creating task registrationServerCommmunication_callback");
+    if (pdPASS != xTaskCreate( __registrationServerCommmunicationCallback_task, "registrationServerCommmunication_callback", 4096, &params, 1, &registrationServerCommmunication_callback_task_handle )) {
+        ESP_LOGE(TAG, "Failed to create the registrationServerCommmunication_callback task.");
+        exit(EXIT_FAILURE);
+    }
 
     return 0;
 }
@@ -69,12 +93,13 @@ void app_main(void)
     //vTaskPrioritySet(NULL, 5);//set the priority of the main task to 5 ? 
     
     registration_data_t registrationData = {};
-    /*err = ESP_OK;[debug]*/err = registration_main(&registrationData, app_registration_network_connectivity_check_handler, app_registration_server_communication_callback);
+    /*err = ESP_OK;[debug]*/err = registration_main(&registrationData, (registrationCallback_Function)app_registration_network_connectivity_check_handler, app_registration_server_communication_callback);
     //ESP_ERROR_CHECK(wifi_connect("ama", "2a0m0o3n")); //[debug]
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "registration_main returned error code [%d]", err);
     } else {
         ESP_LOGI(TAG, "Successfully returned from registration_main");
+        // [TODO] Start general tcp req/resp handler/s using registration data?
         camau_controller_init();
         camau_controller_run(); //CAMAU is mainly executed on core 1
     }

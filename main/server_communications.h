@@ -1,5 +1,7 @@
 #include <stdint.h>
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #define SERVER_COMMUNICATIONS_USE_WOLF_SSL 0 // If set to 1, the traffic will be encrypted
 
@@ -32,5 +34,5 @@ extern void x_on_udp_transmission_end();
 void tcp_connection_manage_task(void* pvParameters);
 void tcp_app_incoming_request_handler_task(void* pvParameters);
 
-void tcp_app_handle_registration_1(char* pcUid_in, uint8_t* puMac_in, char** ppcCid_out);
+void tcp_app_handle_registration(char* pcUid_in, char** ppcCid_out, char** ppcCkey_in, SemaphoreHandle_t semphSync);
 //void tcp_app_send()

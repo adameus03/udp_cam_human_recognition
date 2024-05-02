@@ -82,11 +82,11 @@ struct __sau_gatt_chr_vals {
 
 typedef struct {
     struct __sau_gatt_chr_vals* pCharacteristics; 
-    uint32_t cam_id;
+    char cam_id[CID_LENGTH+1];
     char ckey[CKEY_LENGTH+1];
 } registration_data_t;
 
-typedef uint32_t (*registrationCallback_Function)(registration_data_t* pRegistrationData);
+typedef uint32_t (*registrationCallback_Function)(registration_data_t* pRegistrationData, SemaphoreHandle_t semphSync);
 
 int ble_interface_start();
 
