@@ -418,7 +418,8 @@ int ble_interface_stop() {
 #include "esp_vfs_fat.h"
 //#include "diskio_impl.h" 
 
-#define REGISTRATION_FILE_PATH "/spiflash/registra.dat"
+//#define REGISTRATION_FILE_PATH "/spiflash/registra.dat"
+#define REGISTRATION_FILE_PATH "registra.dat"
 
 /*struct __fatfs_helpers {
     FATFS* pVfsFat;
@@ -607,16 +608,40 @@ esp_err_t ___registration_fatfs_deinit(struct ___fatfs_helpers* pFatfsHelpers) {
 #define with ,
 #define both(x, y) ((x) && (y))
 
-UINT ___registration_fio_read_str(FIL* pFil, char** pStr, UINT maxLength) {
+/*
+    [TODO] Improve error handling for this implementation
+*/
+UINT ___registration_fio_read_str_until_newline(FIL* pFil, char** ppStr, UINT maxLength) {
     char c = '?';
     UINT nc = 0U;
     UINT n = 0U;
     while(f_read(pFil, &c, 1U, &nc)
           yields both(nc == 1U, c != '\n' && n < maxLength)) {
-        (*pStr)[n++] = c;
+        (*ppStr)[n++] = c;
     }
-    (*pStr)[n] = '\0';
+    ESP_LOGI(TAG, "[DEBUG] ___registration_fio_read_str [n = %u]", n);
+    (*ppStr)[n] = '\0';
     return n;
+}
+
+esp_err_t ___registration_fio_read_str(FIL* pFil, char** ppStr, UINT length) {
+    UINT nb = 0U;
+    assert(NULL != *ppStr);
+    f_read(pFil, (void*)*ppStr, length, &nb);
+    if (nb != length) {
+        ESP_LOGE(TAG, "Failed to read str of length %u from file. f_read returned %u.", length, nb);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+void ___registration_fio_write_str(FIL* pFil, char str[], UINT length) {
+    UINT bw = 0;
+    FRESULT fr = f_write(pFil, (void*)str, length, &bw);
+    if (bw != length) {
+        ESP_LOGE(TAG, "Error while writing str to file. [fr = %d]", fr); 
+        exit(EXIT_FAILURE);
+    }
 }
 
 esp_err_t ___registration_fio_read_u32(FIL* pFil, uint32_t* out_pVal) {
@@ -627,6 +652,15 @@ esp_err_t ___registration_fio_read_u32(FIL* pFil, uint32_t* out_pVal) {
         return ESP_FAIL;
     }
     return ESP_OK;
+}
+
+void ___registration_fio_write_u32(FIL* pFil, uint32_t u32) {
+    UINT bw = 0;
+    FRESULT fr = f_write(pFil, (void*)&u32, 4U, &bw);
+    if (bw != 4U) {
+        ESP_LOGE(TAG, "Error while writing u32 to file [fr = %d]", fr);
+        exit(EXIT_FAILURE);
+    }
 }
 
 /*void logi(char* msg, ...) {
@@ -652,60 +686,119 @@ esp_err_t ___registration_fio_fetch_data(registration_data_t* out_pRegistrationD
         ESP_LOGE(TAG, "Failed to open file %s in r mode.", REGISTRATION_FILE_PATH);
         return ESP_FAIL;
     }
-    UINT ssidLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->pCharacteristics->wifi_ssid, MAX_WIFI_SSID_LENGTH);
-    if (ssidLength < MIN_WIFI_SSID_LENGTH || ssidLength > MAX_WIFI_SSID_LENGTH) {
-        ESP_LOGE(TAG, "Detected invalid SSID length in %s !", REGISTRATION_FILE_PATH);
-        //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
-        registration_fio_FALLBACK(fr, &fil);
-    }
-    UINT pskLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->pCharacteristics->wifi_psk, MAX_WIFI_PSK_LENGTH);
-    if (pskLength < MIN_WIFI_PSK_LENGTH || pskLength > MAX_WIFI_PSK_LENGTH) {
-        ESP_LOGE(TAG, "Detected invalid PSK length in %s !", REGISTRATION_FILE_PATH);
-        //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
-        registration_fio_FALLBACK(fr, &fil);
-    }
-    UINT uidLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->pCharacteristics->user_id, MAX_USER_ID_LENGTH);
-    if (uidLength < MIN_USER_ID_LENGTH || uidLength > MAX_USER_ID_LENGTH) {
-        ESP_LOGE(TAG, "Detected invalid UID length in %s !", REGISTRATION_FILE_PATH);
-        //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
-        registration_fio_FALLBACK(fr, &fil);
-    }
-    
-    /*esp_err_t err = ___registration_fio_read_u32(&fil, &out_pRegistrationData->cam_id);
-    
+    ESP_LOGI(TAG, "Opened %s in r mode.", REGISTRATION_FILE_PATH);
+
+    ESP_LOGI(TAG, "Reading wifi_ssid length from file...");
+    UINT wifi_ssid_length = 0U;
+    esp_err_t err = ___registration_fio_read_u32(&fil, (uint32_t*)&wifi_ssid_length);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read cam_id from %s !", REGISTRATION_FILE_PATH);
-        //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
+        ESP_LOGE(TAG, "Failed to read wifi_ssid length from %s !", REGISTRATION_FILE_PATH);
         registration_fio_FALLBACK(fr, &fil);
-    }*/
-
-    UINT cidLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->cam_id, CID_LENGTH);
-    if (cidLength != CID_LENGTH) {
-        ESP_LOGE(TAG, "Detected invalid cid length in %s !", REGISTRATION_FILE_PATH);
+    } else if (wifi_ssid_length < MIN_WIFI_SSID_LENGTH || wifi_ssid_length > MAX_WIFI_SSID_LENGTH) {
+        ESP_LOGE(TAG, "Detected invalid SSID length in %s !", REGISTRATION_FILE_PATH);
         registration_fio_FALLBACK(fr, &fil);
     }
-
-    UINT ckeyLength = ___registration_fio_read_str(&fil, (char**)&out_pRegistrationData->ckey, CKEY_LENGTH);
-    if (ckeyLength != CKEY_LENGTH) {
-        ESP_LOGE(TAG, "Detected invalid ckey length in %s !", REGISTRATION_FILE_PATH);
-        //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_FAIL);
+    ESP_LOGI(TAG, "wifi_ssid_length = %u", wifi_ssid_length);
+    ESP_LOGI(TAG, "Reading wifi_ssid from file...");
+    assert(out_pRegistrationData->pCharacteristics != NULL); // assert that the characteristics pointer is not NULL
+    char* pWifiSsid = out_pRegistrationData->pCharacteristics->wifi_ssid;
+    assert(pWifiSsid != NULL);
+    if (ESP_OK != ___registration_fio_read_str(&fil, &pWifiSsid, wifi_ssid_length)) {
+        ESP_LOGE(TAG, "Failed to read wifi_ssid from %s !", REGISTRATION_FILE_PATH);
         registration_fio_FALLBACK(fr, &fil);
     }
     
+    ESP_LOGI(TAG, "Reading wifi_psk length from file...");
+    UINT wifi_psk_length = 0U;
+    err = ___registration_fio_read_u32(&fil, (uint32_t*)&wifi_psk_length);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read wifi_psk length from %s !", REGISTRATION_FILE_PATH);
+        registration_fio_FALLBACK(fr, &fil);
+    } else if (wifi_psk_length < MIN_WIFI_PSK_LENGTH || wifi_psk_length > MAX_WIFI_PSK_LENGTH) {
+        ESP_LOGE(TAG, "Detected invalid PSK length in %s !", REGISTRATION_FILE_PATH);
+        registration_fio_FALLBACK(fr, &fil);
+    }
+    ESP_LOGI(TAG, "wifi_psk_length = %u", wifi_psk_length);
+    ESP_LOGI(TAG, "Reading wifi_psk from file...");
+    char* pWifiPsk = out_pRegistrationData->pCharacteristics->wifi_psk;
+    if (ESP_OK != ___registration_fio_read_str(&fil, &pWifiPsk, wifi_psk_length)) {
+        ESP_LOGE(TAG, "Failed to read wifi_psk from %s !", REGISTRATION_FILE_PATH);
+        registration_fio_FALLBACK(fr, &fil);
+    }
+    
+    ESP_LOGI(TAG, "Reading uid from file...");
+    char* pUserId = out_pRegistrationData->pCharacteristics->user_id;
+    if (ESP_OK != ___registration_fio_read_str(&fil, &pUserId, MAX_USER_ID_LENGTH)) {
+        ESP_LOGE(TAG, "Failed to read uid from %s !", REGISTRATION_FILE_PATH);
+        registration_fio_FALLBACK(fr, &fil);
+    }
+
+    ESP_LOGI(TAG, "Reading cam_id from file...");
+    char* pCamId = out_pRegistrationData->cam_id;
+    if (ESP_OK != ___registration_fio_read_str(&fil, &pCamId, CID_LENGTH)) {
+        ESP_LOGE(TAG, "Failed to read cam_id from %s !", REGISTRATION_FILE_PATH);
+        registration_fio_FALLBACK(fr, &fil);
+    }
+
+    ESP_LOGI(TAG, "Reading ckey from file...");
+    char* pCkey = out_pRegistrationData->ckey;
+    if (ESP_OK != ___registration_fio_read_str(&fil, &pCkey, CKEY_LENGTH)) {
+        ESP_LOGE(TAG, "Failed to read ckey from %s !", REGISTRATION_FILE_PATH);
+        registration_fio_FALLBACK(fr, &fil);
+    }
+    
+    ESP_LOGI(TAG, "Registration data have been read from \"%s\"", REGISTRATION_FILE_PATH);
     //return (fr=f_close(&fil), ___registration_file_closed_message(fr, REGISTRATION_FILE_PATH), ESP_OK);
     registration_fio_SUCCEED_DISPOSE(fr, &fil);
+}
+
+void ___print_ff_info() {
+    /*TCHAR buff[20];
+    FRESULT fr = f_getcwd(buff, (UINT)20);
+    if (fr == FR_OK) {
+        ESP_LOGI(TAG, "Current working directory: \"%s\"", buff);
+    } else {
+        ESP_LOGE(TAG, "Failed to get current working directory [fr = %d].", fr);
+    }*/
+    //f_getlabel
 }
 
 esp_err_t ___registration_fio_write_data(registration_data_t* pRegistrationData) {
     FIL fil = {};
     FRESULT fr = FR_OK;
+    ___print_ff_info();
     fr = f_open(&fil, REGISTRATION_FILE_PATH, FA_CREATE_NEW | FA_WRITE);
     if (fr != FR_OK) {
-        ESP_LOGE(TAG, "Failed to open file %s in wx mode.", REGISTRATION_FILE_PATH);
+        ESP_LOGE(TAG, "Failed to open file %s in wx mode [fr = %d].", REGISTRATION_FILE_PATH, fr);
         return ESP_FAIL;
     }
-    // [TODO] write structured data to file, close it, check for errors
+    ESP_LOGI(TAG, "Opened %s in wx mode.", REGISTRATION_FILE_PATH);
+    // Write structured data to file. Any I/O errors will cause the system to exit (which is reasonable) 
 
+    UINT wifi_ssid_len = (UINT)strlen(pRegistrationData->pCharacteristics->wifi_ssid);
+    ESP_LOGI(TAG, "Writing wifi_ssid_len = %u to file...", wifi_ssid_len);
+    ___registration_fio_write_u32(&fil, (uint32_t)wifi_ssid_len);
+    ESP_LOGI(TAG, "Writing wifi_sid to file...");
+    ___registration_fio_write_str(&fil, pRegistrationData->pCharacteristics->wifi_ssid, wifi_ssid_len);
+    
+    UINT wifi_psk_len = (UINT)strlen(pRegistrationData->pCharacteristics->wifi_psk);
+    ESP_LOGI(TAG, "Writing wifi_psk_len = %u to file...", wifi_psk_len);
+    ___registration_fio_write_u32(&fil, wifi_psk_len);
+    ESP_LOGI(TAG, "Writing wifi_psk to file...");
+    ___registration_fio_write_str(&fil, pRegistrationData->pCharacteristics->wifi_psk, wifi_psk_len);
+    
+    UINT uid_len = (UINT)strlen(pRegistrationData->pCharacteristics->user_id);
+    ESP_LOGI(TAG, "Writing uid to file...");
+    ___registration_fio_write_str(&fil, pRegistrationData->pCharacteristics->user_id, uid_len);
+
+    ESP_LOGI(TAG, "Writing cam_id to file...");
+    ___registration_fio_write_str(&fil, pRegistrationData->cam_id, (UINT)CID_LENGTH);
+    
+    ESP_LOGI(TAG, "Writing ckey to file...");
+    ___registration_fio_write_str(&fil, pRegistrationData->ckey, (UINT)CKEY_LENGTH);
+
+    ESP_LOGI(TAG, "Registration data have been written to \"%s\"", REGISTRATION_FILE_PATH);
+    registration_fio_SUCCEED_DISPOSE(fr, &fil);
     return 0;
 }
 
@@ -721,7 +814,8 @@ static void __semph_operation_assert_success(int result, char* pcSemphOpName) {
 */
 esp_err_t registration_main(registration_data_t* out_pRegistrationData, 
                             registrationCallback_Function registrationNetworkConnectivityCheckCallback, 
-                            registrationCallback_Function registrationServerCommmunicationCallback) {
+                            registrationCallback_Function registrationServerCommmunicationCallback,
+                            registrationCallback_Function registrationWelcomeBackCallback) {
                                 
     registration_init(out_pRegistrationData);
 
@@ -813,18 +907,32 @@ esp_err_t registration_main(registration_data_t* out_pRegistrationData,
         esp_fill_random(out_pRegistrationData->ckey, CKEY_LENGTH); // Hardware RNG
 
         ESP_LOGI(TAG, "Waiting for first stage registration communication completion...");
+        ESP_LOGW(TAG, "s_semph_serv_comm_callback_sync = %p", s_semph_serv_comm_callback_sync);
         __semph_operation_assert_success(xSemaphoreTake(s_semph_serv_comm_callback_sync, portMAX_DELAY), "xSemaphoreTake"); // Wait for server communication callback first stage completion
+        ESP_LOGI(TAG, "xSemaphoreTake(s_semph_serv_comm_callback_sync, portMAX_DELAY) returned");
         //Write registration data to file
         ESP_LOGI(TAG, "Writing registration data to file...");
-        ESP_LOGE(TAG, "Not implemented."); assert(0); // [TODO]
 
+        for (int i = 0; i < CKEY_LENGTH; i++) {
+            ESP_LOGI(TAG, "ckey[%d] = %02x", i, out_pRegistrationData->ckey[i]);
+        }
+        
+        if (ESP_OK != ___registration_fio_write_data(out_pRegistrationData)) {
+            return ESP_FAIL;
+        }
+
+        ESP_LOGI(TAG, "Calling xSemaphoreGive(s_semph_serv_comm_callback_sync) to signal server communication callback to proceed");
         __semph_operation_assert_success(xSemaphoreGive(s_semph_serv_comm_callback_sync), "xSemaphoreGive"); // Signal server communication callback to proceed
+        ESP_LOGI(TAG, "Waiting for server communication callback to finish...");
         __semph_operation_assert_success(xSemaphoreTake(s_semph_serv_comm_callback_sync, portMAX_DELAY), "xSemaphoreTake"); // Wait for server communication callback to finish
+        ESP_LOGI(TAG, "Deleting the s_semph_serv_comm_callback_sync semaphore, as the registration is now complete.");
         vSemaphoreDelete(s_semph_serv_comm_callback_sync);
 
+    } else if (registrationStatus == DEVICE_REGISTERED) {
+        ESP_LOGI(TAG, "The registration data are available!");
     } else {
-        //fetch registration data from file [TODO]
-        // call registrationNetworkConnectivityCheckCallback (connect WiFi) [TODO] // Check connectivity in loop until connection is obtained? Or fallback to registration (probably not)
+        ESP_LOGE(TAG, "Unknown registration status!");
+        assert(0);
     }
     /*[debug]*/sau_heap_debug_info();
 
@@ -833,6 +941,12 @@ esp_err_t registration_main(registration_data_t* out_pRegistrationData,
         ESP_LOGE(TAG, "fatfs deinitialization failed");
         exit(EXIT_FAILURE);
     } else { ESP_LOGI(TAG, "fatfs deinitialization succeeeded");  }
+
+    if (registrationStatus == DEVICE_REGISTERED) {
+        ESP_LOGI(TAG, "Calling the 'welcome back' callback.");
+        registration_network_state_t networkState = registrationWelcomeBackCallback(out_pRegistrationData, NULL);
+        assert(networkState == NETWORK_STATE_WIFI_CONNECTED); // The callback should block until the network is connected
+    }
 
     // (CAMAU will be started by the caller)
     ESP_LOGI(TAG, "End of registration_main");
@@ -852,6 +966,17 @@ registration_status_t registration_check_device_registered(registration_data_t* 
     FRESULT fResult = f_stat(REGISTRATION_FILE_PATH, &finfo);
     if (fResult == FR_OK) {
         ESP_LOGI(TAG, "%s file exists", REGISTRATION_FILE_PATH);
+        /*/// [TODO] [WARNING] Remove this block after testing
+        // delete file
+        fResult = f_unlink(REGISTRATION_FILE_PATH);
+        if (fResult != FR_OK) {
+            ESP_LOGE(TAG, "Failed to delete %s", REGISTRATION_FILE_PATH);
+            return DEVICE_REGISTRATION_STATUS_UNKNOWN;
+        } else {
+            ESP_LOGI(TAG, "Deleted %s", REGISTRATION_FILE_PATH);
+            return DEVICE_REGISTRATION_STATUS_UNKNOWN;
+        }
+        ///*/
         registrationStatus = DEVICE_REGISTERED;
     } else if (fResult == FR_NO_FILE) {
         ESP_LOGI(TAG, "%s file doesn't exist", REGISTRATION_FILE_PATH);

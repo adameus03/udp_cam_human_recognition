@@ -16,7 +16,7 @@
 //#pragma pack(1) // Force compiler to pack struct members together
 
 static const char * TAG = "server_communications";
-#define HOST_IP_ADDR /*"192.168.1.15"*//*"192.168.173.32"*//*"192.168.116.32"*//*"192.168.43.32"*/"192.168.34.32"
+#define HOST_IP_ADDR /*"192.168.1.15"*//*"192.168.173.32"*//*"192.168.116.32"*//*"192.168.43.32"*//**//*"192.168.34.32"*//*"192.168.123.32"*/"192.168.1.15"
 #define UDP_PORT 3333
 #define TCP_PORT 3334
 
@@ -485,19 +485,33 @@ static QueueHandle_t __tcp_tx_queue;
 static QueueHandle_t __tcp_req_queue;
 static QueueHandle_t __tcp_res_queue;
 
-static SemaphoreHandle_t __tcp_shutdown_semph;
+static SemaphoreHandle_t __tcp_shutdown_semph = NULL;
+static SemaphoreHandle_t __tcp_ready_semph = NULL;
 
 void reset_tcp_conn() {
     if(xSemaphoreGive(__tcp_shutdown_semph) != pdTRUE) { // reset connection
-        ESP_LOGE(TAG, "xSemaphoreGive(__tcp_shutdown_semph) failed");
-        exit(EXIT_FAILURE);
+        ESP_LOGW(TAG, "xSemaphoreGive(__tcp_shutdown_semph) failed. It seems like the connection was already reset.");
+        //exit(EXIT_FAILURE);
+    }
+}
+
+static void __semph_operation_assert_success(int result, char* pcSemphOpName) {
+    if (result != pdTRUE) {
+        ESP_LOGE(TAG, "%s failed.", pcSemphOpName);
+        assert(0);
     }
 }
 
 void __tcp_rx_task(void *pvParameters) {
+    bool ready = false;
     while (1) {
         application_control_segment_t seg = {}; // [TODO] verify if xQueueSend copies its raw buffer (it should as docs say so), otherwise move it outside the loop
                                                 // also, skip segment init?
+        if (!ready) { //[TODO] Should this be done before second recv as well?
+            TASKWISE_LOGF(ESP_LOGI, TAG, "tcp_rx_task", "Waiting for the connection to be ready...");
+            __semph_operation_assert_success(xSemaphoreTake(__tcp_ready_semph, portMAX_DELAY), "xSemaphoreTake");
+            ready = true;
+        }
         ssize_t rv = recv(tcp_sock, seg.header.raw, sizeof(seg.header), 0);
         if (rv == sizeof(seg.header)) {
             if (seg.header.info.data_length > 0) {
@@ -529,6 +543,7 @@ void __tcp_rx_task(void *pvParameters) {
                         ESP_LOGE(TAG, "Error while receiving from TCP socket (trying to receive app seg data bytes) [errno = %d]", errno);
                     }
                     reset_tcp_conn();
+                    ready = false;
                 }
                 
             }
@@ -545,16 +560,23 @@ void __tcp_rx_task(void *pvParameters) {
                 ESP_LOGE(TAG, "Error while receiving from TCP socket (trying to receive app seg header bytes) [errno = %d]", errno);
             }
             reset_tcp_conn();
+            ready = false;
         }
     }
 }
 
 void __tcp_tx_task(void* pvParameters) {
+    bool ready = false;
     while (1) {
         application_control_segment_t seg = {}; //skip segment init?
         if (xQueueReceive(__tcp_tx_queue, &seg, portMAX_DELAY)) {
             
             uint32_t tx_seg_len = sizeof(application_control_segment_info_t) + seg.header.info.data_length;
+            if (!ready) {
+                ESP_LOGI(TAG, "tcp tx task waiting for the connection to be ready...");
+                __semph_operation_assert_success(xSemaphoreTake(__tcp_ready_semph, portMAX_DELAY), "xSemaphoreTake");
+                ready = true;
+            }
             ssize_t rv = send(tcp_sock, seg.raw, (size_t)tx_seg_len, 0);
             if (rv == tx_seg_len) {
                 ESP_LOGI(TAG, "Application control segment from the TX queue was transmitted successfully.");
@@ -571,6 +593,7 @@ void __tcp_tx_task(void* pvParameters) {
                     ESP_LOGE(TAG, "Error while transmitting to TCP socket [errno = %d]", errno);
                 }
                 reset_tcp_conn();
+                ready = false;
             }
         } else {
             ESP_LOGE(TAG, "Failure while receiving from the __tcp_tx_queue queue");
@@ -609,9 +632,14 @@ void __tcp_demux_task(void* pvParametrs) {
     }
 }
 
+TaskHandle_t tcp_demux_task_handle = NULL;
+TaskHandle_t tcp_tx_task_handle = NULL;
+TaskHandle_t tcp_rx_task_handle = NULL;
+
 void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
                                                       // [TODO] remember to delete queues/semaphore when not used? (Increase analyser caps then??)
     __tcp_shutdown_semph = xSemaphoreCreateBinary();
+    __tcp_ready_semph = xSemaphoreCreateCounting(2, 0);
     if (__tcp_shutdown_semph == 0) {
         ESP_LOGE(TAG, "No memory for __tcp_shutdown_semph");
         //return ESP_ERR_NO_MEM;
@@ -642,7 +670,26 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
         exit(EXIT_FAILURE);
     }
 
-    // [TODO] Start tcp arch tasks
+    // Start tcp arch tasks
+    ESP_LOGI(TAG, "Creating task tcp_demux");
+    if (pdPASS != xTaskCreate( __tcp_demux_task, "tcp_demux", 4096, NULL, 1, &tcp_demux_task_handle )) {
+        ESP_LOGE(TAG, "Failed to create the tcp_demux task.");
+        exit(EXIT_FAILURE);
+    }
+
+    ESP_LOGI(TAG, "Creating task tcp_tx");
+    if (pdPASS != xTaskCreate( __tcp_tx_task, "tcp_tx", 4096, NULL, 1, &tcp_tx_task_handle )) {
+        ESP_LOGE(TAG, "Failed to create the tcp_tx task.");
+        exit(EXIT_FAILURE);
+    }
+
+    ESP_LOGI(TAG, "Creating task tcp_rx"); //
+    if (pdPASS != xTaskCreate( __tcp_rx_task, "tcp_rx", 4096, NULL, 1, &tcp_rx_task_handle )) {
+        ESP_LOGE(TAG, "Failed to create the tcp_rx task.");
+        exit(EXIT_FAILURE);
+    }
+
+    ESP_LOGI(TAG, "All core application TCP architecture tasks created. Entering maintanance loop.");
 
     while (1) { // tcp managing infinite loop
 #if SERVER_COMMUNICATIONS_USE_WOLF_SSL == 0
@@ -685,8 +732,11 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
         }
         
         ESP_LOGI(TAG, "TCP socket connected successfully");
-
-        xSemaphoreTake(__tcp_shutdown_semph, portMAX_DELAY);
+        // signal __tcp_ready_semph, so that the tcp tx and rx tasks can continue 
+        __semph_operation_assert_success(xSemaphoreGive(__tcp_ready_semph), "xSemaphoreGive");  // this increases the semaphore count to 1
+        __semph_operation_assert_success(xSemaphoreGive(__tcp_ready_semph), "xSemaphoreGive");  // this increases the semaphore count to 2 (both tx and rx tasks can continue)
+        
+        __semph_operation_assert_success(xSemaphoreTake(__tcp_shutdown_semph, portMAX_DELAY), "xSemaphoreTake");
 
         if (tcp_sock != -1) {
             ESP_LOGE(TAG, "Shutting down TCP socket...");
@@ -722,7 +772,12 @@ void application_registration_section_set_dev_mac(application_registration_secti
 }
 
 void application_registration_section_set_ckey(application_registration_section_t* pSection, char* ckey) {
+    /*if (ckey == NULL) { // debug
+        ESP_LOGE(TAG, "Trying to set a NULL ckey!");
+        exit(EXIT_FAILURE);
+    }*/
     memcpy(pSection->ckey, ckey, CKEY_LENGTH);
+    //memcpy(pSection->ckey, "1351351351351357", CKEY_LENGTH);
 }
 
 static void __queue_operation_assert_success(int result, char* pcQueueName, char* pcQueueOpName, char* pcSuccessMessage) {
@@ -735,13 +790,6 @@ static void __queue_operation_assert_success(int result, char* pcQueueName, char
         exit(EXIT_FAILURE);
     } else {
         ESP_LOGI(TAG, "%s", pcSuccessMessage);
-    }
-}
-
-static void __semph_operation_assert_success(int result, char* pcSemphOpName) {
-    if (result != pdTRUE) {
-        ESP_LOGE(TAG, "%s failed.", pcSemphOpName);
-        assert(0);
     }
 }
 
@@ -768,7 +816,7 @@ void tcp_app_request(application_control_segment_t* pControlSegment) {
     __tcp_app_send_control_segment(pControlSegment);
     ESP_LOGI(TAG, "Waiting for server response...");
     int result = xQueueReceive(__tcp_res_queue, pControlSegment->raw, portMAX_DELAY);
-    __queue_operation_assert_success(result, "__tcp_res_queue", "xQueueReceive", "Received a request from the server.");
+    __queue_operation_assert_success(result, "__tcp_res_queue", "xQueueReceive", "Received a response from the server.");
 }
 
 void tcp_app_handle_registration(char* pcUid_in, char** ppcCid_out, char** ppcCkey_in, SemaphoreHandle_t semphSync) {
@@ -796,13 +844,19 @@ void tcp_app_handle_registration(char* pcUid_in, char** ppcCid_out, char** ppcCk
     char* cid = ((application_registration_section_t*)seg.data)->cid;
     __buffer_assert_exists_nonzero_byte(cid, CID_LENGTH, "Server was expected to generate a valid CID, but they seem to have failed");
 
+    ESP_LOGI(TAG, "End of first stage of registration");//expect specific log after this
+    ESP_LOGW(TAG, "semphSync = %p", semphSync);
     __semph_operation_assert_success(xSemaphoreGive(semphSync), "xSemaphoreGive"); //indicate end of first stage
-    __semph_operation_assert_success(xSemaphoreTake(semphSync, portMAX_DELAY), "xSemaphoreGive"); // wait for registration activities (storage of CID, generating ckey...)
-    
+    ESP_LOGI(TAG, "After xSemaphoreGive(semphSync)"); //debug
+    vTaskDelay(100 / portTICK_PERIOD_MS); // ?
+    __semph_operation_assert_success(xSemaphoreTake(semphSync, portMAX_DELAY), "xSemaphoreTake"); // wait for registration activities (storage of CID, generating ckey...)
+    ESP_LOGI(TAG, "After xSemaphoreTake(semphSync, portMAX_DELAY)"); //debug
+
     seg.header.info.op = OP_DIR_REQUEST(seg.header.info.op);
     application_registration_section_set_ckey ((application_registration_section_t*)seg.data, *ppcCkey_in);
     
-    tcp_app_request(&seg); // passes CKEY to server ; obtains confirmation (any valid response) from 
+    tcp_app_request(&seg); // passes CKEY to server ; obtains confirmation (any valid response) from server
     
+    ESP_LOGI(TAG, "Calling final (xSemaphoreGive(semphSync), to indicate end of registration-related communications with server");
     __semph_operation_assert_success(xSemaphoreGive(semphSync), "xSemaphoreGive"); // indicate end of registration communications
 }

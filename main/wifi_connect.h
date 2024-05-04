@@ -11,5 +11,7 @@ esp_err_t network_wifi_sta_do_disconnect(void);
 
 void network_wifi_shutdown(void);
 
+void network_wifi_set_had_ever_connected();
+
 //esp_err_t wifi_connect(void);
 esp_err_t wifi_connect(char* network_ssid, char* network_psk);

@@ -96,6 +96,7 @@ registration_network_state_t registration_check_wifi_credentials_and_connect(con
 
 esp_err_t registration_main(registration_data_t* out_pRegistrationData, 
                             registrationCallback_Function registrationNetworkConnectivityCheckCallback, 
-                            registrationCallback_Function registrationServerCommmunicationCallback);
+                            registrationCallback_Function registrationServerCommmunicationCallback,
+                            registrationCallback_Function registrationWelcomeBackCallback);
 
 #endif

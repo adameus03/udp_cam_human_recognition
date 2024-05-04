@@ -56,8 +56,8 @@ uint32_t app_registration_server_communication_callback(registration_data_t* pRe
     // Call tcp_app_handle_registration
     __registrationServerCommunicationCallback_params_t params = {
         .pcUid_in = pRegistrationData->pCharacteristics->user_id,
-        .ppcCid_out = (char**)pRegistrationData->cam_id,
-        .ppcCkey_in = (char**)pRegistrationData->ckey,
+        .ppcCid_out = (char**)&pRegistrationData->cam_id,
+        .ppcCkey_in = (char**)&pRegistrationData->ckey,
         .semphSync = semphSync
     };
 
@@ -68,6 +68,11 @@ uint32_t app_registration_server_communication_callback(registration_data_t* pRe
     }
 
     return 0;
+}
+
+uint32_t app_registration_welcome_back_callback(registration_data_t* pRegistrationData, SemaphoreHandle_t semphSync) {
+    network_wifi_set_had_ever_connected();
+    return app_registration_network_connectivity_check_handler(pRegistrationData, NULL);
 }
 
 void app_main(void)
@@ -93,7 +98,10 @@ void app_main(void)
     //vTaskPrioritySet(NULL, 5);//set the priority of the main task to 5 ? 
     
     registration_data_t registrationData = {};
-    /*err = ESP_OK;[debug]*/err = registration_main(&registrationData, (registrationCallback_Function)app_registration_network_connectivity_check_handler, app_registration_server_communication_callback);
+    /*err = ESP_OK;[debug]*/err = registration_main(&registrationData, 
+                                                    (registrationCallback_Function)app_registration_network_connectivity_check_handler, 
+                                                    app_registration_server_communication_callback,
+                                                    (registrationCallback_Function)app_registration_welcome_back_callback);
     //ESP_ERROR_CHECK(wifi_connect("ama", "2a0m0o3n")); //[debug]
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "registration_main returned error code [%d]", err);

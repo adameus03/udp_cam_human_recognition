@@ -21,7 +21,6 @@
 #define CONFIG_NETWORK_WIFI_CONNECT_AP_BY_SIGNAL 1
 #define CONFIG_NETWORK_WIFI_SCAN_RSSI_THRESHOLD -127
 
-
 static const char *TAG = "wifi_connect";
 
 #if CONFIG_NETWORK_CONNECT_WIFI
@@ -64,29 +63,37 @@ static SemaphoreHandle_t s_semph_get_ip6_addrs = NULL;
 #endif
 
 static int s_retry_num = 0;
+static bool had_ever_connected = false;
 
 bool network_is_our_netif(const char *prefix, esp_netif_t *netif)
 {
     return strncmp(prefix, esp_netif_get_desc(netif), strlen(prefix) - 1) == 0;
 }
 
+void network_wifi_set_had_ever_connected() {
+    had_ever_connected = true;
+}
+
 static void handler_on_wifi_disconnect(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
 {
-    s_retry_num++;
-    if (s_retry_num > CONFIG_NETWORK_WIFI_CONN_MAX_RETRY) {
-        ESP_LOGI(TAG, "WiFi Connect failed %d times, stop reconnect.", s_retry_num);
-        /* let network_wifi_sta_do_connect() return */
-        if (s_semph_get_ip_addrs) {
-            xSemaphoreGive(s_semph_get_ip_addrs);
-        }
+    if (!had_ever_connected) {
+        s_retry_num++;
+        if (s_retry_num > CONFIG_NETWORK_WIFI_CONN_MAX_RETRY) {
+            ESP_LOGI(TAG, "WiFi Connect failed %d times, stop reconnect.", s_retry_num);
+            /* let network_wifi_sta_do_connect() return */
+            if (s_semph_get_ip_addrs) {
+                xSemaphoreGive(s_semph_get_ip_addrs);
+            }
 #if CONFIG_NETWORK_CONNECT_IPV6
-        if (s_semph_get_ip6_addrs) {
-            xSemaphoreGive(s_semph_get_ip6_addrs);
-        }
+            if (s_semph_get_ip6_addrs) {
+                xSemaphoreGive(s_semph_get_ip6_addrs);
+            }
 #endif
-        return;
+            return;
+        }
     }
+    
     ESP_LOGI(TAG, "Wi-Fi disconnected, trying to reconnect...");
     esp_err_t err = esp_wifi_connect();
     if (err == ESP_ERR_WIFI_NOT_STARTED) {
