@@ -951,6 +951,14 @@ esp_err_t registration_main(registration_data_t* out_pRegistrationData,
     // (CAMAU will be started by the caller)
     ESP_LOGI(TAG, "End of registration_main");
 
+    if (registrationStatus == DEVICE_UNREGISTERED) {
+        ESP_LOGI(TAG, "Performing after-registration system reset to increase dma_largest_free_block by ~4KiB");
+        ESP_LOGW(TAG, "###########################");
+        ESP_LOGW(TAG, "#@ OFFICIALLY REGISTERED @#");
+        ESP_LOGW(TAG, "###########################");
+        esp_restart();
+    }
+
     return ESP_OK;
 }
 

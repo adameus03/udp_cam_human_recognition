@@ -464,15 +464,13 @@ void __application_control_segment_free_data (application_control_segment_t* pSe
  * TCP Server
  * 
  *  Tasks:
- *      1. TCP receiver task (writes to queue #1)
- *      2. TCP transmitter task (reads from queue #2)
- *      3. rx demultiplexer task (reads from queue #2, writes to queues #3 and #4)
+ *      1. TCP receiver task (performs application segment demultiplexing by writing to queues #2 and #3)
+ *      2. TCP transmitter task (reads from queue #1)
  * 
  *  Queues: 
- *      1. TCP rx queue
- *      2. TCP tx queue
- *      3. Client-initiated communications 
- *      4. Server-initiated communications
+ *      1. TCP tx queue
+ *      2. TCP rx request queue
+ *      3. TCP rx response queue
 */
 
 #define COMM_TCP_RX_QUEUE_MAX_LENGTH 10
@@ -480,7 +478,7 @@ void __application_control_segment_free_data (application_control_segment_t* pSe
 #define COMM_TCP_REQ_QUEUE_MAX_LENGTH 10
 #define COMM_TCP_RES_QUEUE_MAX_LENGTH 10
 
-static QueueHandle_t __tcp_rx_queue;
+//static QueueHandle_t __tcp_rx_queue;
 static QueueHandle_t __tcp_tx_queue;
 static QueueHandle_t __tcp_req_queue;
 static QueueHandle_t __tcp_res_queue;
@@ -502,6 +500,32 @@ static void __semph_operation_assert_success(int result, char* pcSemphOpName) {
     }
 }
 
+void __tcp_demux(application_control_segment_t seg) {
+    QueueHandle_t targetQueueHandle = NULL;
+    if (seg.header.info.op == OP_DIR_REQUEST(seg.header.info.op)) {
+        targetQueueHandle = __tcp_req_queue;
+    } else {
+        targetQueueHandle = __tcp_res_queue;
+    }
+    int result = xQueueSend(targetQueueHandle, &seg, portMAX_DELAY);
+    if (result != pdTRUE){
+        if (result == errQUEUE_FULL) {
+            ESP_LOGE(TAG, "%s", targetQueueHandle == __tcp_req_queue ? "Trying to send to request queue which is full!" : "Trying to send to response queue which is full!");
+        } else {
+            if (targetQueueHandle == __tcp_req_queue) {
+                ESP_LOGE(TAG, "xQueueSend(__tcp_req_queue, seg.raw, portMAX_DELAY) failed, [ret val: %d]", result);
+            } else {
+                ESP_LOGE(TAG, "xQueueSend(__tcp_res_queue, seg.raw, portMAX_DELAY) failed, [ret val: %d]", result);
+            }
+        }
+        //reset_tcp_conn();
+        ESP_LOGE(TAG, "Calling exit(EXIT_FAILURE) because xQueueSend failed even though it was called with portMAX_DELAY.");
+        exit(EXIT_FAILURE);
+    } else {
+        ESP_LOGI(TAG, "%s", targetQueueHandle == __tcp_req_queue ? "Successfully demultiplexed an application segment into the request queue." : "Successfully demultiplexed an application segment into the response queue.");
+    }
+}
+
 void __tcp_rx_task(void *pvParameters) {
     bool ready = false;
     while (1) {
@@ -518,7 +542,7 @@ void __tcp_rx_task(void *pvParameters) {
                 rv = recv(tcp_sock, seg.data, seg.header.info.data_length, 0);
                 if (rv == seg.header.info.data_length) {
                     
-                    int result = xQueueSend(__tcp_rx_queue, &seg, portMAX_DELAY); // pass application segment to the rx queue
+                    /*int result = xQueueSend(__tcp_rx_queue, &seg, portMAX_DELAY); // pass application segment to the rx queue
                     
                     if (result != pdTRUE){
                         if (result == errQUEUE_FULL) {
@@ -529,7 +553,8 @@ void __tcp_rx_task(void *pvParameters) {
                         exit(EXIT_FAILURE);
                     } else {
                         ESP_LOGI(TAG, "Application control segment received into the RX queue.");
-                    }
+                    }*/
+                    __tcp_demux(seg);
                 } else {
                     if (rv == 0) {
                         ESP_LOGE(TAG, "Received empty seg data, when non-empty seg data was expected!");
@@ -601,40 +626,18 @@ void __tcp_tx_task(void* pvParameters) {
     }
 }
 
-void __tcp_demux_task(void* pvParametrs) {
+/*void __tcp_demux_task(void* pvParametrs) {
     while (1) {
         application_control_segment_t seg = {}; //skip segment init?
         if (xQueueReceive(__tcp_rx_queue, &seg, portMAX_DELAY)) {
-            QueueHandle_t targetQueueHandle = NULL;
-            if (seg.header.info.op == OP_DIR_REQUEST(seg.header.info.op)) {
-                targetQueueHandle = __tcp_req_queue;
-            } else {
-                targetQueueHandle = __tcp_res_queue;
-            }
-            int result = xQueueSend(targetQueueHandle, &seg, portMAX_DELAY);
-            if (result != pdTRUE){
-                if (result == errQUEUE_FULL) {
-                    ESP_LOGE(TAG, "%s", targetQueueHandle == __tcp_req_queue ? "Trying to send to request queue which is full!" : "Trying to send to response queue which is full!");
-                } else {
-                    if (targetQueueHandle == __tcp_req_queue) {
-                        ESP_LOGE(TAG, "xQueueSend(__tcp_req_queue, seg.raw, portMAX_DELAY) failed, [ret val: %d]", result);
-                    } else {
-                        ESP_LOGE(TAG, "xQueueSend(__tcp_res_queue, seg.raw, portMAX_DELAY) failed, [ret val: %d]", result);
-                    }
-                }
-                //reset_tcp_conn();
-                ESP_LOGE(TAG, "Calling exit(EXIT_FAILURE) because xQueueSend failed even though it was called with portMAX_DELAY.");
-                exit(EXIT_FAILURE);
-            } else {
-                ESP_LOGI(TAG, "%s", targetQueueHandle == __tcp_req_queue ? "Successfully demultiplexed an application segment into the request queue." : "Successfully demultiplexed an application segment into the response queue.");
-            }
+            __tcp_demux(seg);
         } else {
             ESP_LOGE(TAG, "Failure while receiving from the __tcp_tx_queue queue");
         }
     }
-}
+}*/
 
-TaskHandle_t tcp_demux_task_handle = NULL;
+//TaskHandle_t tcp_demux_task_handle = NULL;
 TaskHandle_t tcp_tx_task_handle = NULL;
 TaskHandle_t tcp_rx_task_handle = NULL;
 
@@ -648,11 +651,11 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
         exit(EXIT_FAILURE);
     }
     
-    __tcp_rx_queue = xQueueCreate(COMM_TCP_RX_QUEUE_MAX_LENGTH, COMM_MAX_APP_SEG_SIZE);
+    /*__tcp_rx_queue = xQueueCreate(COMM_TCP_RX_QUEUE_MAX_LENGTH, COMM_MAX_APP_SEG_SIZE);
     if (__tcp_rx_queue == 0) {
         ESP_LOGE(TAG, "Couldn't create __tcp_rx_queue");
         exit(EXIT_FAILURE);
-    }
+    }*/
 
     __tcp_tx_queue = xQueueCreate(COMM_TCP_TX_QUEUE_MAX_LENGTH, COMM_MAX_APP_SEG_SIZE);
     if (__tcp_tx_queue == 0) {
@@ -661,23 +664,23 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
     }
 
     __tcp_req_queue = xQueueCreate(COMM_TCP_REQ_QUEUE_MAX_LENGTH, COMM_MAX_APP_SEG_SIZE);
-    if (__tcp_rx_queue == 0) {
+    if (__tcp_req_queue == 0) {
         ESP_LOGE(TAG, "Couldn't create __tcp_req_queue");
         exit(EXIT_FAILURE);
     }
 
     __tcp_res_queue = xQueueCreate(COMM_TCP_RES_QUEUE_MAX_LENGTH, COMM_MAX_APP_SEG_SIZE);
-    if (__tcp_tx_queue == 0) {
+    if (__tcp_req_queue == 0) {
         ESP_LOGE(TAG, "Couldn't create __tcp_res_queue");
         exit(EXIT_FAILURE);
     }
 
     // Start tcp arch tasks
-    ESP_LOGI(TAG, "Creating task tcp_demux");
+    /*ESP_LOGI(TAG, "Creating task tcp_demux");
     if (pdPASS != xTaskCreate( __tcp_demux_task, "tcp_demux", 2048, NULL, 1, &tcp_demux_task_handle )) {
         ESP_LOGE(TAG, "Failed to create the tcp_demux task.");
         exit(EXIT_FAILURE);
-    }
+    }*/
 
     ESP_LOGI(TAG, "Creating task tcp_tx");
     if (pdPASS != xTaskCreate( __tcp_tx_task, "tcp_tx", 2048, NULL, 1, &tcp_tx_task_handle )) {
