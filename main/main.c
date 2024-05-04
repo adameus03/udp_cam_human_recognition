@@ -22,12 +22,12 @@ registration_network_state_t app_registration_network_connectivity_check_handler
     
     if (wifi_conn_err == ESP_OK) {
         ESP_LOGI(TAG, "Creating task 'tcp_conection_manager'");
-        if (pdPASS != xTaskCreate( tcp_connection_manage_task, "tcp_conection_manager", 4096, NULL, 1, &tcp_connection_manage_task_handle)) {
+        if (pdPASS != xTaskCreate( tcp_connection_manage_task, "tcp_conection_manager", 2048, NULL, 1, &tcp_connection_manage_task_handle)) {
             ESP_LOGE(TAG, "Failed to create the tcp_conection_manager task.");
             exit(EXIT_FAILURE); // [TODO] Does this make esp32 reset or not?
         }
         ESP_LOGI(TAG, "Creating task 'tcp_app_incoming_request_handler'");
-        if (pdPASS != xTaskCreate( tcp_app_incoming_request_handler_task, "tcp_app_incoming_request_handler", 4096, NULL, 1, &tcp_app_incoming_request_handler_task_handle)) {
+        if (pdPASS != xTaskCreate( tcp_app_incoming_request_handler_task, "tcp_app_incoming_request_handler", 2048, NULL, 1, &tcp_app_incoming_request_handler_task_handle)) {
             ESP_LOGE(TAG, "Failed to create the tcp_app_incoming_request_handler task.");
             exit(EXIT_FAILURE);
         }
@@ -51,18 +51,21 @@ void __registrationServerCommmunicationCallback_task(void* pvParameters) {
 
 TaskHandle_t registrationServerCommmunication_callback_task_handle = NULL;
 
+char* ___pCamId = NULL; char* ___pCkey = NULL;
 uint32_t app_registration_server_communication_callback(registration_data_t* pRegistrationData, SemaphoreHandle_t semphSync) {
     // [TODO] trigger a communication to get cam_id and ckey from server
     // Call tcp_app_handle_registration
+    ___pCamId = pRegistrationData->cam_id;
+    ___pCkey = pRegistrationData->ckey;
     __registrationServerCommunicationCallback_params_t params = {
         .pcUid_in = pRegistrationData->pCharacteristics->user_id,
-        .ppcCid_out = (char**)&pRegistrationData->cam_id,
-        .ppcCkey_in = (char**)&pRegistrationData->ckey,
+        .ppcCid_out = &___pCamId,
+        .ppcCkey_in = &___pCkey,
         .semphSync = semphSync
     };
 
     ESP_LOGI(TAG, "Creating task registrationServerCommmunication_callback");
-    if (pdPASS != xTaskCreate( __registrationServerCommmunicationCallback_task, "registrationServerCommmunication_callback", 4096, &params, 1, &registrationServerCommmunication_callback_task_handle )) {
+    if (pdPASS != xTaskCreate( __registrationServerCommmunicationCallback_task, "registrationServerCommmunication_callback", 2560, &params, 1, &registrationServerCommmunication_callback_task_handle )) {
         ESP_LOGE(TAG, "Failed to create the registrationServerCommmunication_callback task.");
         exit(EXIT_FAILURE);
     }

@@ -622,7 +622,9 @@ void __tcp_demux_task(void* pvParametrs) {
                         ESP_LOGE(TAG, "xQueueSend(__tcp_res_queue, seg.raw, portMAX_DELAY) failed, [ret val: %d]", result);
                     }
                 }
-                reset_tcp_conn();
+                //reset_tcp_conn();
+                ESP_LOGE(TAG, "Calling exit(EXIT_FAILURE) because xQueueSend failed even though it was called with portMAX_DELAY.");
+                exit(EXIT_FAILURE);
             } else {
                 ESP_LOGI(TAG, "%s", targetQueueHandle == __tcp_req_queue ? "Successfully demultiplexed an application segment into the request queue." : "Successfully demultiplexed an application segment into the response queue.");
             }
@@ -672,19 +674,19 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
 
     // Start tcp arch tasks
     ESP_LOGI(TAG, "Creating task tcp_demux");
-    if (pdPASS != xTaskCreate( __tcp_demux_task, "tcp_demux", 4096, NULL, 1, &tcp_demux_task_handle )) {
+    if (pdPASS != xTaskCreate( __tcp_demux_task, "tcp_demux", 2048, NULL, 1, &tcp_demux_task_handle )) {
         ESP_LOGE(TAG, "Failed to create the tcp_demux task.");
         exit(EXIT_FAILURE);
     }
 
     ESP_LOGI(TAG, "Creating task tcp_tx");
-    if (pdPASS != xTaskCreate( __tcp_tx_task, "tcp_tx", 4096, NULL, 1, &tcp_tx_task_handle )) {
+    if (pdPASS != xTaskCreate( __tcp_tx_task, "tcp_tx", 2048, NULL, 1, &tcp_tx_task_handle )) {
         ESP_LOGE(TAG, "Failed to create the tcp_tx task.");
         exit(EXIT_FAILURE);
     }
 
     ESP_LOGI(TAG, "Creating task tcp_rx"); //
-    if (pdPASS != xTaskCreate( __tcp_rx_task, "tcp_rx", 4096, NULL, 1, &tcp_rx_task_handle )) {
+    if (pdPASS != xTaskCreate( __tcp_rx_task, "tcp_rx", 2048, NULL, 1, &tcp_rx_task_handle )) {
         ESP_LOGE(TAG, "Failed to create the tcp_rx task.");
         exit(EXIT_FAILURE);
     }
@@ -776,6 +778,7 @@ void application_registration_section_set_ckey(application_registration_section_
         ESP_LOGE(TAG, "Trying to set a NULL ckey!");
         exit(EXIT_FAILURE);
     }*/
+    assert(ckey != NULL);
     memcpy(pSection->ckey, ckey, CKEY_LENGTH);
     //memcpy(pSection->ckey, "1351351351351357", CKEY_LENGTH);
 }
