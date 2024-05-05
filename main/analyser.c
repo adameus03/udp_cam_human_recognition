@@ -8,6 +8,8 @@
 
 static const char * TAG = "analyser";
 
+//static SemaphoreHandle_t ;;;
+
 void analyser_init() {
     ESP_LOGI(TAG, "Initialising analyser");
 
@@ -34,6 +36,7 @@ void analyser_run(uint32_t usStackDepth) {
     // Create the analyser task on core 1
     xTaskCreatePinnedToCore(__analyser_task, "analyser_task", usStackDepth, NULL, 5, NULL, 1); // [TODO] Really?
     //__analyser_task(NULL);
+    sau_heap_debug_info();
 }
 
 

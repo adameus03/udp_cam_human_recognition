@@ -189,6 +189,7 @@ def run_reassembler(patience=5):
         
         elif only_chunk_found:
             print("[Reassembler] Found the only JFIF chunk")
+            jfif_queue.put(jfif_data, block=False) #
             continue
 
         for patience_counter in range(patience):

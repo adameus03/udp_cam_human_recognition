@@ -85,6 +85,10 @@ void app_main(void)
     rtc_wdt_disable();
 
     ESP_LOGI(TAG, "Starting main");
+    esp_log_level_set("server_communications", ESP_LOG_NONE);
+    esp_log_level_set("CAMAU_CONTROLLER", ESP_LOG_NONE);
+    esp_log_level_set("analyser", ESP_LOG_NONE);
+
     //ESP_ERROR_CHECK(nvs_flash_init()); // or maybe do like this: https://github.com/espressif/esp-idf/blob/master/examples/bluetooth/nimble/blehr/main/main.c#L276
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {

@@ -87,13 +87,24 @@ void end_udp_stream() {
 #endif
 }
 
-typedef union {
+/*typedef union {
     struct {
         uint32_t pkt_idx; // Chunk index (assigns chunk index to IP packet)
         jfif_chunk_type_t chunk_type; // JFIF_INTERMEDIATE_CHUNK, JFIF_FIRST_CHUNK, JFIF_LAST_CHUNK or JFIF_ONLY_CHUNK
         uint8_t data[jfif_chunk_segment_max_data_size]; // JFIF chunk data buffer
     } structure;
     uint8_t raw[jfif_chunk_segment_total_size];
+} jfif_chunk_segment_t;*/
+
+typedef struct {
+    union {
+        struct {
+            uint32_t pkt_idx; // Chunk index (assigns chunk index to IP packet)
+            jfif_chunk_type_t chunk_type; // JFIF_INTERMEDIATE_CHUNK, JFIF_FIRST_CHUNK, JFIF_LAST_CHUNK or JFIF_ONLY_CHUNK
+        };
+        uint8_t raw[APP_DESC_SEGMENT_SIZE];
+    } __attribute__((packed)) desc;
+    uint8_t* pData; //JFIF chunk data buffer ptr
 } jfif_chunk_segment_t;
 
 /**
@@ -123,7 +134,9 @@ esp_err_t transmit_udp(uint8_t* data, size_t len) {
         return ESP_FAIL;
     }
     ESP_LOGI(TAG, "Sending %d bytes...", len);
-    int err = sendto(udp_sock, data, MAX_UDP_DATA_SIZE, 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+    assert(data != NULL);
+    // [replace] int err = sendto(udp_sock, data, MAX_UDP_DATA_SIZE, 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+    int err = sendto(udp_sock, data, len, 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
     if (err < 0) {
         ESP_LOGE(TAG, "Error occurred during sending JFIF chunk via UDP: errno %d", errno);
         return ESP_FAIL;
@@ -141,45 +154,76 @@ esp_err_t transmit_jfif(uint8_t** jfif_buf_ptr, size_t len) {
 #if SERVER_COMMUNICATIONS_USE_WOLFSSL == 0
     static uint32_t pkt_idx = 0U;
     uint32_t remaining_bytes = len;
-    uint8_t* txPtr = *jfif_buf_ptr;
+    //[replace with #a] uint8_t* txPtr = *jfif_buf_ptr;
     //static const uint32_t MAX_JFIF_CHUNK_SZ = MAX_UDP_DATA_SIZE - APP_DESC_SEGMENT_SIZE;
 
     uint32_t chunk_data_len = -1U;
     //transform_segment(jfif_buf_ptr, chunk_len, pkt_idx, JFIF_FIRST_CHUNK);
     
     jfif_chunk_segment_t seg;
-    seg.structure.pkt_idx = pkt_idx;
+    //[replace] seg.structure.pkt_idx = pkt_idx;
+    seg.pData = *jfif_buf_ptr; // #a
+    seg.desc.pkt_idx = pkt_idx;
+    
     if (len <= jfif_chunk_segment_max_data_size) {
         chunk_data_len = len;
-        seg.structure.chunk_type = JFIF_CHUNK_TYPE(JFIF_ONLY_CHUNK);
+        //[replace] seg.structure.chunk_type = JFIF_CHUNK_TYPE(JFIF_ONLY_CHUNK);
+        seg.desc.chunk_type = JFIF_CHUNK_TYPE(JFIF_ONLY_CHUNK);
     } else {
         chunk_data_len = jfif_chunk_segment_max_data_size;
-        seg.structure.chunk_type = JFIF_CHUNK_TYPE(JFIF_FIRST_CHUNK);
+        //[replace] seg.structure.chunk_type = JFIF_CHUNK_TYPE(JFIF_FIRST_CHUNK);
+        seg.desc.chunk_type = JFIF_CHUNK_TYPE(JFIF_FIRST_CHUNK);
     }
-    memcpy(seg.structure.data, txPtr, chunk_data_len);
 
-    //transmit_udp(*jfif_buf_ptr, chunk_data_len + APP_DESC_SEGMENT_SIZE);
-    transmit_udp(seg.raw, chunk_data_len + APP_DESC_SEGMENT_SIZE);
+    //[remove] memcpy(seg.structure.data, txPtr, chunk_data_len);
+    //[replace] transmit_udp(seg.raw, chunk_data_len + APP_DESC_SEGMENT_SIZE);
+
+    uint8_t* buf = (uint8_t*)malloc(chunk_data_len + APP_DESC_SEGMENT_SIZE);
+    memcpy(buf, seg.desc.raw, APP_DESC_SEGMENT_SIZE);
+    memcpy(buf + APP_DESC_SEGMENT_SIZE, seg.pData, chunk_data_len);
+    transmit_udp(buf, chunk_data_len + APP_DESC_SEGMENT_SIZE);
+    free(buf);
+    
+    //transmit_udp(seg.desc.raw, APP_DESC_SEGMENT_SIZE);
+    //transmit_udp(seg.pData, chunk_data_len);
+
     pkt_idx++;
     remaining_bytes -= chunk_data_len;
     
     while (remaining_bytes > 0) { /** @warning remaining_bytes is unsigned, watch out */
-        txPtr += chunk_data_len;
-        seg.structure.pkt_idx = pkt_idx;
+        //[replace] txPtr += chunk_data_len;
+        seg.pData += chunk_data_len;
+        //[replace] seg.structure.pkt_idx = pkt_idx;
+        seg.desc.pkt_idx = pkt_idx;
         if (remaining_bytes > jfif_chunk_segment_max_data_size) {
-            seg.structure.chunk_type = JFIF_CHUNK_TYPE(JFIF_INTERMEDIATE_CHUNK);
+            //[replace] seg.structure.chunk_type = JFIF_CHUNK_TYPE(JFIF_INTERMEDIATE_CHUNK);
+            seg.desc.chunk_type = JFIF_CHUNK_TYPE(JFIF_INTERMEDIATE_CHUNK);
         }
         else {
-            seg.structure.chunk_type = JFIF_CHUNK_TYPE(JFIF_LAST_CHUNK);
+            //[replace] seg.structure.chunk_type = JFIF_CHUNK_TYPE(JFIF_LAST_CHUNK);
+            seg.desc.chunk_type = JFIF_CHUNK_TYPE(JFIF_LAST_CHUNK);
             chunk_data_len = remaining_bytes;
         }
-        seg.structure.chunk_type = remaining_bytes > jfif_chunk_segment_max_data_size ? 
+        /* [replace] seg.structure.chunk_type = remaining_bytes > jfif_chunk_segment_max_data_size ? 
+            JFIF_CHUNK_TYPE(JFIF_INTERMEDIATE_CHUNK) : 
+            JFIF_CHUNK_TYPE(JFIF_LAST_CHUNK);*/
+        seg.desc.chunk_type = remaining_bytes > jfif_chunk_segment_max_data_size ? 
             JFIF_CHUNK_TYPE(JFIF_INTERMEDIATE_CHUNK) : 
             JFIF_CHUNK_TYPE(JFIF_LAST_CHUNK);
         //return ESP_OK; /** @test */
-        memcpy(seg.structure.data, txPtr, chunk_data_len);
 
-        transmit_udp(seg.raw, chunk_data_len + APP_DESC_SEGMENT_SIZE);
+        //[remove] memcpy(seg.structure.data, txPtr, chunk_data_len);
+        //[replace]transmit_udp(seg.raw, chunk_data_len + APP_DESC_SEGMENT_SIZE);
+
+        uint8_t* buf = (uint8_t*)malloc(chunk_data_len + APP_DESC_SEGMENT_SIZE);
+        memcpy(buf, seg.desc.raw, APP_DESC_SEGMENT_SIZE);
+        memcpy(buf + APP_DESC_SEGMENT_SIZE, seg.pData, chunk_data_len);
+        transmit_udp(buf, chunk_data_len + APP_DESC_SEGMENT_SIZE);
+        free(buf);
+
+        //transmit_udp(seg.desc.raw, APP_DESC_SEGMENT_SIZE);
+        //transmit_udp(seg.pData, chunk_data_len);
+
         pkt_idx++;
         remaining_bytes -= chunk_data_len;
     }

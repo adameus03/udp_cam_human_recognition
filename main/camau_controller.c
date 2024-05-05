@@ -13,6 +13,7 @@ void camau_controller_init(void) {
 void camau_controller_run(void) {
     ESP_LOGI(TAG, "Running camau controller");
     //begin_udp_stream();//
+    //analyser_run((MAX_UDP_DATA_SIZE<<1) + 1024);
     analyser_run((MAX_UDP_DATA_SIZE<<1) + 1024);
 }
 

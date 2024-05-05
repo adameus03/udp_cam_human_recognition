@@ -44,18 +44,19 @@ static camera_config_t camera_config = {
     .pin_href = CAM_PIN_HREF,
     .pin_pclk = CAM_PIN_PCLK,
 
-    .xclk_freq_hz = 20000000,//EXPERIMENTAL: Set to 16MHz on ESP32-S2 or ESP32-S3 to enable EDMA mode
+    .xclk_freq_hz = 16000000,//EXPERIMENTAL: Set to 16MHz on ESP32-S2 or ESP32-S3 to enable EDMA mode
+    //.xclk_freq_hz = 10000000,
     .ledc_timer = LEDC_TIMER_0,
     .ledc_channel = LEDC_CHANNEL_0,
 
     .pixel_format = PIXFORMAT_JPEG,//YUV422,GRAYSCALE,RGB565,JPEG
     //.frame_size = FRAMESIZE_UXGA,//QQVGA-UXGA, For ESP32, do not use sizes above QVGA when not JPEG. The performance of the ESP32-S series has improved a lot, but JPEG mode always gives better frame rates.
-    .frame_size = /*FRAMESIZE_SVGA*/FRAMESIZE_UXGA,
+    .frame_size = FRAMESIZE_HVGA/*FRAMESIZE_SVGA*//*FRAMESIZE_SXGA*//*FRAMESIZE_UXGA*/,
 
-    .jpeg_quality = 12, //0-63, for OV series camera sensors, lower number means higher quality
-    .fb_count = 1, //When jpeg mode is used, if fb_count more than one, the driver will work in continuous mode.
+    .jpeg_quality = /*12*/10, //0-63, for OV series camera sensors, lower number means higher quality
+    .fb_count = 2, //When jpeg mode is used, if fb_count more than one, the driver will work in continuous mode.
     //.grab_mode = CAMERA_GRAB_WHEN_EMPTY//CAMERA_GRAB_LATEST. Sets when buffers should be filled
-    .grab_mode = CAMERA_GRAB_LATEST
+    //.grab_mode = CAMERA_GRAB_LATEST
 };
 
 esp_err_t camera_init(int frame_size, int jpeg_quality){
@@ -70,9 +71,9 @@ esp_err_t camera_init(int frame_size, int jpeg_quality){
     ESP_LOGI(TAG, "Calling esp_camera_sensor_get");
     sensor_t * s = esp_camera_sensor_get();
     ESP_LOGI(TAG, "Returned from esp_camera_sensor_get");
-    s->set_framesize(s, (framesize_t)frame_size);
+    //s->set_framesize(s, (framesize_t)frame_size);
     //change the jpeg quality
-    s->set_quality(s, jpeg_quality);
+    //s->set_quality(s, jpeg_quality);
     return ESP_OK;
 }
 
