@@ -1013,3 +1013,15 @@ registration_status_t registration_check_device_registered(registration_data_t* 
 void registration_init(registration_data_t* out_pRegistrationData) {
     out_pRegistrationData->pCharacteristics = &sau_gatt_registration_service_chr_values;
 }
+
+esp_err_t registration_unregister() {
+    // delete registration file
+    FRESULT fResult = f_unlink(REGISTRATION_FILE_PATH);
+    if (fResult != FR_OK) {
+        ESP_LOGE(TAG, "Failed to delete %s", REGISTRATION_FILE_PATH);
+        return ESP_FAIL;
+    } else {
+        ESP_LOGI(TAG, "Deleted %s", REGISTRATION_FILE_PATH);
+        return ESP_OK;
+    }
+}

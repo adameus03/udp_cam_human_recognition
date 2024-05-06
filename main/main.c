@@ -22,7 +22,7 @@ registration_network_state_t app_registration_network_connectivity_check_handler
     
     if (wifi_conn_err == ESP_OK) {
         ESP_LOGI(TAG, "Creating task 'tcp_conection_manager'");
-        if (pdPASS != xTaskCreate( tcp_connection_manage_task, "tcp_conection_manager", 2048, NULL, 1, &tcp_connection_manage_task_handle)) {
+        if (pdPASS != xTaskCreate( tcp_connection_manage_task, "tcp_conection_manager", 2304, NULL, 1, &tcp_connection_manage_task_handle)) {
             ESP_LOGE(TAG, "Failed to create the tcp_conection_manager task.");
             exit(EXIT_FAILURE); // [TODO] Does this make esp32 reset or not?
         }
@@ -75,6 +75,8 @@ uint32_t app_registration_server_communication_callback(registration_data_t* pRe
 
 uint32_t app_registration_welcome_back_callback(registration_data_t* pRegistrationData, SemaphoreHandle_t semphSync) {
     network_wifi_set_had_ever_connected();
+    app_tcp_set_mode(APP_TCP_COMM_MODE_REGULAR);
+    app_comm_set_credentials(pRegistrationData->cam_id, pRegistrationData->ckey);
     return app_registration_network_connectivity_check_handler(pRegistrationData, NULL);
 }
 
@@ -85,9 +87,10 @@ void app_main(void)
     rtc_wdt_disable();
 
     ESP_LOGI(TAG, "Starting main");
-    esp_log_level_set("server_communications", ESP_LOG_NONE);
-    esp_log_level_set("CAMAU_CONTROLLER", ESP_LOG_NONE);
-    esp_log_level_set("analyser", ESP_LOG_NONE);
+    // Log config
+    //esp_log_level_set("server_communications", ESP_LOG_NONE);
+    //esp_log_level_set("CAMAU_CONTROLLER", ESP_LOG_NONE);
+    //esp_log_level_set("analyser", ESP_LOG_NONE);
 
     //ESP_ERROR_CHECK(nvs_flash_init()); // or maybe do like this: https://github.com/espressif/esp-idf/blob/master/examples/bluetooth/nimble/blehr/main/main.c#L276
     esp_err_t err = nvs_flash_init();
@@ -105,6 +108,7 @@ void app_main(void)
     //vTaskPrioritySet(NULL, 5);//set the priority of the main task to 5 ? 
     
     registration_data_t registrationData = {};
+    app_tcp_set_mode(APP_TCP_COMM_MODE_REGISTRATION);
     /*err = ESP_OK;[debug]*/err = registration_main(&registrationData, 
                                                     (registrationCallback_Function)app_registration_network_connectivity_check_handler, 
                                                     app_registration_server_communication_callback,
@@ -114,6 +118,8 @@ void app_main(void)
         ESP_LOGE(TAG, "registration_main returned error code [%d]", err);
     } else {
         ESP_LOGI(TAG, "Successfully returned from registration_main");
+        
+
         // [TODO] Start general tcp req/resp handler/s using registration data?
         camau_controller_init();
         camau_controller_run(); //CAMAU is mainly executed on core 1

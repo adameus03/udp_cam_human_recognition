@@ -10,15 +10,22 @@
 #include <lwip/netdb.h>
 #include <string.h> /** @tidy Not already included? */
 
-#include "registration.h"
 #include "misc.h"
 
 //#pragma pack(1) // Force compiler to pack struct members together
+
+#define COMM_CSID_LENGTH 16
+#define COMM_NETIF_WIFI_STA_MAC_ADDR_LENGTH 6
 
 static const char * TAG = "server_communications";
 #define HOST_IP_ADDR /*"192.168.1.15"*//*"192.168.173.32"*//*"192.168.116.32"*//*"192.168.43.32"*//**//*"192.168.34.32"*//*"192.168.123.32"*/"192.168.1.15"
 #define UDP_PORT 3333
 #define TCP_PORT 3334
+
+static char __comm_csid[COMM_CSID_LENGTH];
+static uint8_t __comm_session_initiated = 0U;
+
+static app_comm_credentials_t __comm_credentials = {};
 
 char host_ip[] = HOST_IP_ADDR;
 int addr_family = AF_INET;
@@ -361,14 +368,17 @@ esp_err_t transmit_udp(uint8_t* data, size_t len) {
 
     return ESP_OK;
 }*/
+
+void app_comm_set_credentials(char* cid, char* ckey) {
+    memcpy(__comm_credentials.cid, cid, CID_LENGTH);
+    memcpy(__comm_credentials.ckey, ckey, CKEY_LENGTH);
+}
+
 ///////////////
 
 /*
     TCP COMMUNICATIONS - data structures for application control
 */
-
-#define COMM_NETIF_WIFI_STA_MAC_ADDR_LENGTH 6
-#define COMM_CSID_LENGTH 16
 
 typedef union { // op = APP_CONTROL_OP_REGISTER
     struct {
@@ -380,14 +390,20 @@ typedef union { // op = APP_CONTROL_OP_REGISTER
     uint8_t raw[MAX_USER_ID_LENGTH + COMM_NETIF_WIFI_STA_MAC_ADDR_LENGTH + CID_LENGTH + CKEY_LENGTH];
 } __attribute__((packed)) application_registration_section_t; // size = 54
 
+typedef union { // op = APP_CONTROL_OP_UNREGISTER
+    struct {
+        uint8_t succeeded; // 0x01 if succeeded, 0x00 otherwise
+    };
+    uint8_t raw[1];
+} __attribute__((packed)) application_unregistration_section_t; //size = 1
+
 typedef union { // op = APP_CONTROL_OP_INITCOMM
     struct {
         char cid[CID_LENGTH]; // Cam ID, no null terminator
         char ckey[CKEY_LENGTH]; // Cam auth key, no null terminator
-        char csid[COMM_CSID_LENGTH]; // Cam session ID, no null terminator
     };
-    uint8_t raw[CID_LENGTH + CKEY_LENGTH + COMM_CSID_LENGTH];
-} __attribute__((packed)) application_initcomm_section_t; // size = 48
+    uint8_t raw[CID_LENGTH + CKEY_LENGTH];
+} __attribute__((packed)) application_initcomm_section_t; // size = 32
 
 #define APP_CONTROL_CAM_CONFIG_RES_OK 0U
 #define APP_CONTROL_CAM_CONFIG_RES_JPEG_QUALITY_UNSUPPORED 1U
@@ -529,6 +545,7 @@ static QueueHandle_t __tcp_res_queue;
 
 static SemaphoreHandle_t __tcp_shutdown_semph = NULL;
 static SemaphoreHandle_t __tcp_ready_semph = NULL;
+static SemaphoreHandle_t __tcp_tx_queue_empty_semph = NULL; // [TODO] [WARNING]
 
 void reset_tcp_conn() {
     if(xSemaphoreGive(__tcp_shutdown_semph) != pdTRUE) { // reset connection
@@ -634,6 +651,13 @@ void __tcp_rx_task(void *pvParameters) {
     }
 }
 
+static uint8_t is_awaiting_tx_queue_empty = 0U;
+
+static void await_tx_queue_empty() {
+    is_awaiting_tx_queue_empty = 1U;
+    xSemaphoreTake(__tcp_tx_queue_empty_semph, portMAX_DELAY);
+}
+
 void __tcp_tx_task(void* pvParameters) {
     bool ready = false;
     while (1) {
@@ -667,6 +691,12 @@ void __tcp_tx_task(void* pvParameters) {
         } else {
             ESP_LOGE(TAG, "Failure while receiving from the __tcp_tx_queue queue");
         }
+
+        if (is_awaiting_tx_queue_empty) {
+            if (0 == uxQueueMessagesWaiting(__tcp_tx_queue)) {
+                xSemaphoreGive(__tcp_tx_queue_empty_semph);
+            }
+        }
     }
 }
 
@@ -685,10 +715,33 @@ void __tcp_tx_task(void* pvParameters) {
 TaskHandle_t tcp_tx_task_handle = NULL;
 TaskHandle_t tcp_rx_task_handle = NULL;
 
+static app_tcp_comm_mode_t __comm_mode = APP_TCP_COMM_MODE_REGISTRATION;
+
+void app_tcp_set_mode(app_tcp_comm_mode_t mode) {
+    __comm_mode = mode;
+}
+
+static void comm_set_session_initiated() {
+    __comm_session_initiated = 1U;
+}
+
+static void comm_set_session_uninitiated() {
+    __comm_session_initiated = 0U;
+}
+
+static void comm_set_csid(char* csid) {
+    memcpy(__comm_csid, csid, COMM_CSID_LENGTH);
+}
+
+static char* comm_get_csid() {
+    return __comm_csid;
+}
+
 void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
                                                       // [TODO] remember to delete queues/semaphore when not used? (Increase analyser caps then??)
     __tcp_shutdown_semph = xSemaphoreCreateBinary();
     __tcp_ready_semph = xSemaphoreCreateCounting(2, 0);
+    __tcp_tx_queue_empty_semph = xSemaphoreCreateBinary();
     if (__tcp_shutdown_semph == 0) {
         ESP_LOGE(TAG, "No memory for __tcp_shutdown_semph");
         //return ESP_ERR_NO_MEM;
@@ -770,28 +823,44 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
             exit(EXIT_FAILURE);
         }
 
+        uint8_t recreate_socket = 0U;
         while (1) {
             rv = connect(tcp_sock, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
             if (rv == 0) {
+                break;
+            } else if (errno == ENOTCONN) { 
+                ESP_LOGE(TAG, "TCP connect returned ENOTCONN, trying to create socket again...");
+                recreate_socket = 1U;
                 break;
             } else  {
                 ESP_LOGE(TAG, "Unable to connect TCP socket: errno %d; Waiting 3 seconds...", errno);
                 vTaskDelay(3000 / portTICK_PERIOD_MS);
             }
         }
-        
+        if (recreate_socket) {
+            continue;
+        }
+
         ESP_LOGI(TAG, "TCP socket connected successfully");
         // signal __tcp_ready_semph, so that the tcp tx and rx tasks can continue 
         __semph_operation_assert_success(xSemaphoreGive(__tcp_ready_semph), "xSemaphoreGive");  // this increases the semaphore count to 1
         __semph_operation_assert_success(xSemaphoreGive(__tcp_ready_semph), "xSemaphoreGive");  // this increases the semaphore count to 2 (both tx and rx tasks can continue)
-        
-        __semph_operation_assert_success(xSemaphoreTake(__tcp_shutdown_semph, portMAX_DELAY), "xSemaphoreTake");
+
+        if (__comm_mode == APP_TCP_COMM_MODE_REGULAR) {
+            char* pCsid = __comm_csid;
+            tcp_app_init_comm(&pCsid);
+        }
+
+        __semph_operation_assert_success(xSemaphoreTake(__tcp_shutdown_semph, portMAX_DELAY), "xSemaphoreTake"); // Wait until sock shutdown requested
+
+        comm_set_session_uninitiated();
 
         if (tcp_sock != -1) {
             ESP_LOGE(TAG, "Shutting down TCP socket...");
             shutdown(tcp_sock, 0);//SHUT_RDWR
             close(tcp_sock); 
         }
+
 #else
         ESP_LOGE(TAG, "WolfSSL integration Not implemented");
         exit(EXIT_FAILURE);
@@ -799,12 +868,6 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
     } // end of tcp managing infinite loop
 }
 
-void tcp_app_incoming_request_handler_task(void* pvParameters) {
-    while (1) {
-        ESP_LOGE(TAG, "tcp_app_incoming_request_handler_task is not implemented!");
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-}
 
 #define COMM_UID_LENGTH MAX_USER_ID_LENGTH
 
@@ -828,6 +891,14 @@ void application_registration_section_set_ckey(application_registration_section_
     assert(ckey != NULL);
     memcpy(pSection->ckey, ckey, CKEY_LENGTH);
     //memcpy(pSection->ckey, "1351351351351357", CKEY_LENGTH);
+}
+
+void application_initcomm_section_set_cid(application_initcomm_section_t* pSection, char* cid) {
+    memcpy(pSection->cid, cid, CID_LENGTH);
+}
+
+void application_initcomm_section_set_ckey(application_initcomm_section_t* pSection, char* ckey) {
+    memcpy(pSection->ckey, ckey, CKEY_LENGTH);
 }
 
 static void __queue_operation_assert_success(int result, char* pcQueueName, char* pcQueueOpName, char* pcSuccessMessage) {
@@ -889,6 +960,7 @@ void tcp_app_handle_registration(char* pcUid_in, char** ppcCid_out, char** ppcCk
 
     application_control_segment_set_data (&seg, registrationSection.raw);
     
+    ESP_LOGI(TAG, "Requesting registration...");
     tcp_app_request(&seg); // passes UID, mac to server ; obtains CID from server
 
     char* cid = ((application_registration_section_t*)seg.data)->cid;
@@ -909,4 +981,85 @@ void tcp_app_handle_registration(char* pcUid_in, char** ppcCid_out, char** ppcCk
     
     ESP_LOGI(TAG, "Calling final (xSemaphoreGive(semphSync), to indicate end of registration-related communications with server");
     __semph_operation_assert_success(xSemaphoreGive(semphSync), "xSemaphoreGive"); // indicate end of registration communications
+}
+
+void tcp_app_init_comm(char** ppCsid) {
+    application_control_segment_t seg = {
+        .header = {
+            .info = {
+                .data_length = sizeof(application_initcomm_section_t),
+                .op = OP_DIR_REQUEST(APP_CONTROL_OP_INITCOMM)
+            }
+        }
+    };
+
+    application_initcomm_section_t initcommSection = {};
+    application_initcomm_section_set_cid(&initcommSection, __comm_credentials.cid);
+    application_initcomm_section_set_ckey(&initcommSection, __comm_credentials.ckey);
+
+    application_control_segment_set_data(&seg, initcommSection.raw);
+
+    ESP_LOGI(TAG, "Requesting initcomm...");
+    tcp_app_request(&seg); // passes CID, CKEY to server ; obtains CSID from server (if auth succeeded)
+    
+    char* csid = seg.header.info.csid;
+    __buffer_assert_exists_nonzero_byte(csid, COMM_CSID_LENGTH, "SERVER AUTHENTICATION FAILED!");
+
+    comm_set_csid(csid);
+    ESP_LOGI(TAG, "Server communications session csid obtained: %02x %02x %02x ... %02x", 
+            (uint8_t)(csid[0]), (uint8_t)(csid[1]), (uint8_t)(csid[2]), (uint8_t)(csid[COMM_CSID_LENGTH - 1]));
+
+    comm_set_session_initiated();
+}
+
+/*
+    App request handlers (for requests received from the application server)
+*/
+
+static void tcp_app_handle_unregistration_request(application_control_segment_t* pSeg) {
+    ESP_LOGI(TAG, "Unregistration requested by the server.");
+    application_unregistration_section_t unregistrationSection = {};
+    esp_err_t err = registration_unregister();
+    if (err == ESP_OK) {
+        unregistrationSection.succeeded = 1U;
+        application_control_segment_set_data(pSeg, unregistrationSection.raw);
+        __tcp_app_send_control_segment(pSeg);
+        ESP_LOGI(TAG, "Waiting for queued tx segments");
+        await_tx_queue_empty();
+
+        ESP_LOGI(TAG, "Performing system reset due to unregistration - switching to BLE peripheral mode");
+        ESP_LOGW(TAG, "###########################");
+        ESP_LOGW(TAG, "#!!!    UNREGISTERED   !!!#");
+        ESP_LOGW(TAG, "###########################");
+        esp_restart();
+    } else {
+        ESP_LOGE(TAG, "Failed to unregister!");
+        unregistrationSection.succeeded = 0U;
+        application_control_segment_set_data(pSeg, unregistrationSection.raw);
+        __tcp_app_send_control_segment(pSeg);
+    }
+}
+
+/**
+ * @brief Task handler for processing incoming requests
+*/
+void tcp_app_incoming_request_handler_task(void* pvParameters) {
+    application_control_segment_t seg = {};
+    while (1) {
+        /*ESP_LOGE(TAG, "tcp_app_incoming_request_handler_task is not implemented!");
+        vTaskDelay(1000 / portTICK_PERIOD_MS);*/
+
+        int result = xQueueReceive(__tcp_req_queue, seg.raw, portMAX_DELAY);
+        __queue_operation_assert_success(result, "__tcp_req_queue", "xQueueReceive", "Received a request from the server.");
+
+        switch (seg.header.info.op) {
+            case APP_CONTROL_OP_UNREGISTER:
+                tcp_app_handle_unregistration_request(&seg);
+                break;
+            
+            default:
+                ESP_LOGE(TAG, "Detected unknown or unhandled request! (op = %u)", seg.header.info.op);
+                break;
+        }
+    }
 }

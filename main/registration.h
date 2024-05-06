@@ -99,4 +99,6 @@ esp_err_t registration_main(registration_data_t* out_pRegistrationData,
                             registrationCallback_Function registrationServerCommmunicationCallback,
                             registrationCallback_Function registrationWelcomeBackCallback);
 
+esp_err_t registration_unregister();
+
 #endif

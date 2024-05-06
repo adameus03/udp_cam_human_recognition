@@ -40,30 +40,51 @@ void analyser_run(uint32_t usStackDepth) {
 }
 
 
-unsigned int testing_index = 0;
-unsigned char analyser_in_excitement = 0;
+//unsigned int testing_index = 0;
+//unsigned char analyser_in_excitement = 0;
+
+static analyser_operation_mode_t operation_mode = ANALYSER_OPERATION_MODE_ANALYSIS;
+
+void analyser_set_operation_mode(analyser_operation_mode_t mode) {
+    operation_mode = mode;
+}
+
+
 /**
  * @brief This function is called when a camera frame is captured
 */
 void x_camera_process_image(int width, int height, int format, uint8_t** ppuDataBufAddr, size_t len) {
-    ESP_LOGD(TAG, "Testing index: %d", testing_index);
+    switch (operation_mode) {
+        case ANALYSER_OPERATION_MODE_ANALYSIS:
+            printf("!");
+            break;
+        case ANALYSER_OPERATION_MODE_UNCONDITIONAL_STREAM:
+            x_analyser_perform_action(width, height, format, ppuDataBufAddr, len);
+            break;
+        default:
+            ESP_LOGE(TAG, "Unknown analyser operation mode!");
+            break;
+    }
+
+
+    /*ESP_LOGD(TAG, "Testing index: %d", testing_index);
     if (analyser_in_excitement) {
         ESP_LOGI(TAG, "In excitement, skipping image processing");
         x_analyser_perform_action(width, height, format, ppuDataBufAddr, len);
-        if (testing_index == 1/*9*/) {
+        if (testing_index == 1) {//9
             testing_index = 0;
             analyser_in_excitement = 0;
             return;
         }
     } else {
         ESP_LOGI(TAG, "Processing image");
-        if(testing_index == 0/*99*/) {
+        if(testing_index == 0) {//99
             ESP_LOGD(TAG, "Action triggered");
             testing_index = 0;
             analyser_in_excitement = 1;
             x_analyser_perform_action(width, height, format, ppuDataBufAddr, len);
         }
     }
-    testing_index++;
+    testing_index++;*/
 }
 

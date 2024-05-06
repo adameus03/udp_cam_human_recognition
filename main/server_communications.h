@@ -2,6 +2,7 @@
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "registration.h"
 
 #define SERVER_COMMUNICATIONS_USE_WOLF_SSL 0 // If set to 1, the traffic will be encrypted
 
@@ -10,6 +11,16 @@
 #define MAX_UDP_DATA_SIZE /*65500*//*32750*/16375/*4096*/
 #define jfif_chunk_segment_total_size MAX_UDP_DATA_SIZE
 #define jfif_chunk_segment_max_data_size (MAX_UDP_DATA_SIZE - APP_DESC_SEGMENT_SIZE)
+
+typedef enum {
+    APP_TCP_COMM_MODE_REGISTRATION,
+    APP_TCP_COMM_MODE_REGULAR
+} app_tcp_comm_mode_t;
+
+typedef struct {
+    char cid[CID_LENGTH];
+    char ckey[CKEY_LENGTH];
+} app_comm_credentials_t;
 
 typedef enum {
     JFIF_INTERMEDIATE_CHUNK = 0x0U,
@@ -30,9 +41,14 @@ esp_err_t transmit_jfif(uint8_t** jfif_buf_ptr, size_t len);
 extern void x_on_udp_transmission_end();
 
 
+//void app_comm_set_registration_data(registration_data_t registrationData);
+void app_comm_set_credentials(char* cid, char* ckey);
+
+void app_tcp_set_mode(app_tcp_comm_mode_t mode);
 //void setup_and_manage_tcp_connection();
 void tcp_connection_manage_task(void* pvParameters);
 void tcp_app_incoming_request_handler_task(void* pvParameters);
 
 void tcp_app_handle_registration(char* pcUid_in, char** ppcCid_out, char** ppcCkey_in, SemaphoreHandle_t semphSync);
 //void tcp_app_send()
+void tcp_app_init_comm(char** ppCsid);
