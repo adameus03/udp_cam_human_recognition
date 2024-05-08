@@ -6,8 +6,10 @@
 
 #define SERVER_COMMUNICATIONS_USE_WOLF_SSL 0 // If set to 1, the traffic will be encrypted
 
+#define COMM_CSID_LENGTH 16
+#define COMM_NETIF_WIFI_STA_MAC_ADDR_LENGTH 6
 
-#define APP_DESC_SEGMENT_SIZE 5
+#define APP_DESC_SEGMENT_SIZE (5 + COMM_CSID_LENGTH)
 #define MAX_UDP_DATA_SIZE /*65500*//*32750*/16375/*4096*/
 #define jfif_chunk_segment_total_size MAX_UDP_DATA_SIZE
 #define jfif_chunk_segment_max_data_size (MAX_UDP_DATA_SIZE - APP_DESC_SEGMENT_SIZE)
@@ -52,3 +54,4 @@ void tcp_app_incoming_request_handler_task(void* pvParameters);
 void tcp_app_handle_registration(char* pcUid_in, char** ppcCid_out, char** ppcCkey_in, SemaphoreHandle_t semphSync);
 //void tcp_app_send()
 void tcp_app_init_comm(char** ppCsid);
+void tcp_app_initcomm_task(void* pvParameters);

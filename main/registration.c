@@ -1015,13 +1015,29 @@ void registration_init(registration_data_t* out_pRegistrationData) {
 }
 
 esp_err_t registration_unregister() {
+    // Initialize fatfs and mount the filesystem
+    struct ___fatfs_helpers fatfsHelpers = {};
+    esp_err_t err = ___registration_fatfs_init(&fatfsHelpers);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "fatfs initialization failed");
+        return ESP_FAIL;
+    } else { ESP_LOGI(TAG, "fatfs initialization succeeded");  }
+
     // delete registration file
     FRESULT fResult = f_unlink(REGISTRATION_FILE_PATH);
     if (fResult != FR_OK) {
-        ESP_LOGE(TAG, "Failed to delete %s", REGISTRATION_FILE_PATH);
+        ESP_LOGE(TAG, "Failed to delete %s [rv = %d]", REGISTRATION_FILE_PATH, fResult);
         return ESP_FAIL;
     } else {
         ESP_LOGI(TAG, "Deleted %s", REGISTRATION_FILE_PATH);
         return ESP_OK;
     }
+
+    // Deinitialize the filesystem
+    err = ___registration_fatfs_deinit(&fatfsHelpers);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "fatfs deinitialization failed !!!");
+    } else { ESP_LOGI(TAG, "fatfs deinitialization succeeded");  }
+
+    return ESP_OK;
 }

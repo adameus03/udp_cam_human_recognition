@@ -17,7 +17,16 @@ int client_sock_handler(int client_sock) {
             return 1;
         }
 
-        if (0 == strcmp(command, "initcomm\n")) {
+        if (0 == strcmp(command, "register\n")) {
+            if (0 != registration_sock_handler(client_sock)) {
+                return 1;
+            }
+        } else if (0 == strcmp(command, "unregister\n")) {
+            if (0 != unregistration_sock_handler(client_sock)) {
+                return 1;
+            }
+        }
+        else if (0 == strcmp(command, "initcomm\n")) {
             if (0 != initcomm_sock_handler(client_sock)) {
                 return 1;
             }
@@ -31,6 +40,14 @@ int client_sock_handler(int client_sock) {
             }
         } else if (0 == strcmp(command, "nop\n")) {
             if (0 != nop_sock_handler(client_sock)) {
+                return 1;
+            }
+        } else if (0 == strcmp(command, "logs minimal\n")) {
+            if (0 != logs_mode_minimal_sock_handler(client_sock)) {
+                return 1;
+            }
+        } else if (0 == strcmp(command, "logs complete\n")) {
+            if (0 != logs_mode_complete_sock_handler(client_sock)) {
                 return 1;
             }
         } else if (0 == strcmp(command, "exit\n")) { // Not really a server command, but enables user to gracefully exit the program

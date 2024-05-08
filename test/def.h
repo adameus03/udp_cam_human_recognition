@@ -58,6 +58,13 @@ typedef union { // op = APP_CONTROL_OP_REGISTER
     uint8_t raw[MAX_USER_ID_LENGTH + COMM_NETIF_WIFI_STA_MAC_ADDR_LENGTH + CID_LENGTH + CKEY_LENGTH];
 } __attribute__((packed)) application_registration_section_t; // size = 54
 
+typedef union { // op = APP_CONTROL_OP_UNREGISTER
+    struct {
+        uint8_t succeeded; // 0x01 if succeeded, 0x00 otherwise
+    };
+    uint8_t raw[1];
+} __attribute__((packed)) application_unregistration_section_t; //size = 1
+
 typedef union { // op = APP_CONTROL_OP_INITCOMM
     struct {
         char cid[CID_LENGTH]; // Cam ID, no null terminator
@@ -138,6 +145,8 @@ typedef union { // op = APP_CONTROL_OP_GET_DEVICE_INFO
 #define APP_CONTROL_OP_OTA 0x10U // OTA Firmware update
 #define APP_CONTROL_OP_SOFTWARE_DEVICE_RESET 0x11U // Trigger device software reset
 #define APP_CONTROL_OP_GET_DEVICE_INFO 0x12U
+#define APP_CONTROL_OP_LOGS_MODE_MINIMAL 0x13U
+#define APP_CONTROL_OP_LOGS_MODE_COMPLETE 0x14U
 #define APP_CONTROL_OP_UNKNOWN 0x7FU
 
 /*

@@ -15,9 +15,6 @@
 
 //#pragma pack(1) // Force compiler to pack struct members together
 
-#define COMM_CSID_LENGTH 16
-#define COMM_NETIF_WIFI_STA_MAC_ADDR_LENGTH 6
-
 static const char * TAG = "server_communications";
 #define HOST_IP_ADDR /*"192.168.1.15"*//*"192.168.173.32"*//*"192.168.116.32"*//*"192.168.43.32"*//**//*"192.168.34.32"*//*"192.168.123.32"*/"192.168.1.15"
 #define UDP_PORT 3333
@@ -109,6 +106,7 @@ typedef struct {
         struct {
             uint32_t pkt_idx; // Chunk index (assigns chunk index to IP packet)
             jfif_chunk_type_t chunk_type; // JFIF_INTERMEDIATE_CHUNK, JFIF_FIRST_CHUNK, JFIF_LAST_CHUNK or JFIF_ONLY_CHUNK
+            //char csid[COMM_CSID_LENGTH];
         };
         uint8_t raw[APP_DESC_SEGMENT_SIZE];
     } __attribute__((packed)) desc;
@@ -183,6 +181,9 @@ esp_err_t transmit_jfif(uint8_t** jfif_buf_ptr, size_t len) {
         seg.desc.chunk_type = JFIF_CHUNK_TYPE(JFIF_FIRST_CHUNK);
     }
 
+    // Set CSID
+    memcpy(seg.desc.raw + 5, __comm_csid, COMM_CSID_LENGTH);
+
     //[remove] memcpy(seg.structure.data, txPtr, chunk_data_len);
     //[replace] transmit_udp(seg.raw, chunk_data_len + APP_DESC_SEGMENT_SIZE);
 
@@ -219,6 +220,9 @@ esp_err_t transmit_jfif(uint8_t** jfif_buf_ptr, size_t len) {
             JFIF_CHUNK_TYPE(JFIF_INTERMEDIATE_CHUNK) : 
             JFIF_CHUNK_TYPE(JFIF_LAST_CHUNK);
         //return ESP_OK; /** @test */
+
+        // Set CSID
+        memcpy(seg.desc.raw + 5, __comm_csid, COMM_CSID_LENGTH);
 
         //[remove] memcpy(seg.structure.data, txPtr, chunk_data_len);
         //[replace]transmit_udp(seg.raw, chunk_data_len + APP_DESC_SEGMENT_SIZE);
@@ -478,6 +482,9 @@ typedef union { // op = APP_CONTROL_OP_GET_DEVICE_INFO
 #define APP_CONTROL_OP_OTA 0x10U // OTA Firmware update
 #define APP_CONTROL_OP_SOFTWARE_DEVICE_RESET 0x11U // Trigger device software reset
 #define APP_CONTROL_OP_GET_DEVICE_INFO 0x12U
+#define APP_CONTROL_OP_LOGS_MODE_MINIMAL 0x13U
+#define APP_CONTROL_OP_LOGS_MODE_COMPLETE 0x14U
+
 #define APP_CONTROL_OP_UNKNOWN 0x7FU
 
 /*
@@ -549,6 +556,8 @@ static SemaphoreHandle_t __tcp_ready_semph = NULL;
 static SemaphoreHandle_t __tcp_tx_queue_empty_semph = NULL; // [TODO] [WARNING]
 
 void reset_tcp_conn() {
+    vTaskDelay(100 / portTICK_PERIOD_MS); // ?
+    ESP_LOGW(TAG, "Calling xSemaphoreGive(__tcp_shutdown_semph)...");
     if(xSemaphoreGive(__tcp_shutdown_semph) != pdTRUE) { // reset connection
         ESP_LOGW(TAG, "xSemaphoreGive(__tcp_shutdown_semph) failed. It seems like the connection was already reset.");
         //exit(EXIT_FAILURE);
@@ -661,9 +670,10 @@ void __tcp_rx_task(void *pvParameters) {
 
 static uint8_t is_awaiting_tx_queue_empty = 0U;
 
-static void await_tx_queue_empty() {
-    is_awaiting_tx_queue_empty = 1U;
-    xSemaphoreTake(__tcp_tx_queue_empty_semph, portMAX_DELAY);
+static void await_tx_queue_empty() { // [TODO] [WARNING]
+    ESP_LOGE(TAG, "Skipping await for now, as its implementation has a bug.");
+    /*is_awaiting_tx_queue_empty = 1U;
+    xSemaphoreTake(__tcp_tx_queue_empty_semph, portMAX_DELAY);*/
 }
 
 void __tcp_tx_task(void* pvParameters) {
@@ -723,6 +733,8 @@ void __tcp_tx_task(void* pvParameters) {
 //TaskHandle_t tcp_demux_task_handle = NULL;
 TaskHandle_t tcp_tx_task_handle = NULL;
 TaskHandle_t tcp_rx_task_handle = NULL;
+
+TaskHandle_t tcp_app_initcomm_task_handle = NULL; // handle for a helper task that will be created to perform the APP_CONTROL_OP_INITCOMM operation
 
 static app_tcp_comm_mode_t __comm_mode = APP_TCP_COMM_MODE_REGISTRATION;
 
@@ -795,7 +807,7 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
     }
 
     ESP_LOGI(TAG, "Creating task tcp_rx"); //
-    if (pdPASS != xTaskCreate( __tcp_rx_task, "tcp_rx", 2048, NULL, 1, &tcp_rx_task_handle )) {
+    if (pdPASS != xTaskCreate( __tcp_rx_task, "tcp_rx", 2304, NULL, 1, &tcp_rx_task_handle )) {
         ESP_LOGE(TAG, "Failed to create the tcp_rx task.");
         exit(EXIT_FAILURE);
     }
@@ -858,10 +870,16 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
         __semph_operation_assert_success(xSemaphoreGive(__tcp_ready_semph), "xSemaphoreGive");  // this increases the semaphore count to 2 (both tx and rx tasks can continue)
 
         if (__comm_mode == APP_TCP_COMM_MODE_REGULAR) {
-            char* pCsid = __comm_csid;
-            tcp_app_init_comm(&pCsid);
+            /*char* pCsid = __comm_csid;
+            tcp_app_init_comm(&pCsid);*/
+            ESP_LOGI(TAG, "Creating task tcp_app_initcomm"); //
+            if (pdPASS != xTaskCreate( tcp_app_initcomm_task, "tcp_app_initcomm", 2048, NULL, 1, &tcp_app_initcomm_task_handle )) {
+                ESP_LOGE(TAG, "Failed to create the tcp_app_initcomm task.");
+                exit(EXIT_FAILURE);
+            }
         }
 
+        ESP_LOGW(TAG, "Waiting for __tcp_shutdown_semph (semph should be given when there are connection issues)...");
         __semph_operation_assert_success(xSemaphoreTake(__tcp_shutdown_semph, portMAX_DELAY), "xSemaphoreTake"); // Wait until sock shutdown requested
         ESP_LOGI(TAG, "xSemaphoreTake(__tcp_shutdown_semph, portMAX_DELAY) returned.");
 
@@ -1059,6 +1077,12 @@ void tcp_app_init_comm(char** ppCsid) {
     comm_set_session_initiated();
 }
 
+void tcp_app_initcomm_task(void* pvParameters) {
+    char* pCsid = comm_get_csid();
+    tcp_app_init_comm(&pCsid);
+    vTaskDelete(NULL);
+}
+
 /*
     App request handlers (for requests received from the application server)
 */
@@ -1107,6 +1131,35 @@ static void tcp_app_handle_stop_unconditional_stream_request(application_control
     tcp_app_send_response(pSeg);
 }
 
+static void tcp_app_handle_logs_mode_minimal_request(application_control_segment_t* pSeg) {
+    ESP_LOGI(TAG, "Minimal logs mode requested by the server.");
+    //esp_log_level_set("*", ESP_LOG_ERROR);
+    esp_log_level_set("server_communications", ESP_LOG_NONE);
+    esp_log_level_set("CAMAU_CONTROLLER", ESP_LOG_NONE);
+    esp_log_level_set("analyser", ESP_LOG_NONE);
+    
+    tcp_app_send_response(pSeg);
+}
+
+static void tcp_app_handle_logs_mode_complete_request(application_control_segment_t* pSeg) {
+    ESP_LOGI(TAG, "Complete logs mode requested by the server.");
+    
+    esp_log_level_set("server_communications", ESP_LOG_INFO);
+    esp_log_level_set("CAMAU_CONTROLLER", ESP_LOG_INFO);
+    esp_log_level_set("analyser", ESP_LOG_INFO);
+
+    tcp_app_send_response(pSeg);
+}
+
+static void tcp_app_handle_software_device_reset_request(application_control_segment_t* pSeg) {
+    ESP_LOGI(TAG, "Software device reset requested by the server. Waiting for queued tx segments...");
+    await_tx_queue_empty();
+    tcp_app_send_response(pSeg);
+    ESP_LOGW(TAG, "Restarting the device now.");
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    esp_restart();
+}
+
 /**
  * @brief Task handler for processing incoming requests
 */
@@ -1132,6 +1185,15 @@ void tcp_app_incoming_request_handler_task(void* pvParameters) {
                 break;
             case APP_CONTROL_OP_CAM_STOP_UNCONDITIONAL_STREAM:
                 tcp_app_handle_stop_unconditional_stream_request(&seg);
+                break;
+            case APP_CONTROL_OP_LOGS_MODE_MINIMAL:
+                tcp_app_handle_logs_mode_minimal_request(&seg);
+                break;
+            case APP_CONTROL_OP_LOGS_MODE_COMPLETE:
+                tcp_app_handle_logs_mode_complete_request(&seg);
+                break;
+            case APP_CONTROL_OP_SOFTWARE_DEVICE_RESET:
+                tcp_app_handle_software_device_reset_request(&seg);
                 break;
             default:
                 ESP_LOGE(TAG, "Detected unknown or unhandled request! (op = %u)", seg.header.info.op);

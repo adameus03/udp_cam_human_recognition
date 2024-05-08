@@ -53,8 +53,11 @@ int registration_sock_handler(int client_sock) {
     pRegistrationSection = (application_registration_section_t*)seg.data;
     printf("UID = %.*s\n", (int)MAX_USER_ID_LENGTH, pRegistrationSection->user_id);
     printf("MAC = %02x:%02x:%02x:%02x:%02x:%02x\n", pRegistrationSection->dev_mac[0], pRegistrationSection->dev_mac[1], pRegistrationSection->dev_mac[2], pRegistrationSection->dev_mac[3], pRegistrationSection->dev_mac[4], pRegistrationSection->dev_mac[5]);
-    printf("CID = %.*s\n", (int)CID_LENGTH, pRegistrationSection->cid);
-    printf("CKEY = %.*s\n", (int)CKEY_LENGTH, pRegistrationSection->ckey);
+    //printf("CID = %.*s\n", (int)CID_LENGTH, pRegistrationSection->cid);
+    //printf("CKEY = %.*s\n", (int)CKEY_LENGTH, pRegistrationSection->ckey);
+
+    printf("CID = "); print_hex(pRegistrationSection->cid, CID_LENGTH); printf("\n");
+    printf("CKEY = "); print_hex(pRegistrationSection->ckey, CKEY_LENGTH); printf("\n");
 
     seg.header.info.op = OP_DIR_RESPONSE(APP_CONTROL_OP_REGISTER);
     // SEND RESPONSE (final step - confirmation of receiving the CKEY and guarantee completion of registration) - return complete segment as received from the device, but with the response bit set
@@ -67,6 +70,42 @@ int registration_sock_handler(int client_sock) {
 
     return 0;
 }
+
+int unregistration_sock_handler(int client_sock) {
+    application_control_segment_t seg = {
+        .header = {
+            .info = {
+                .op = OP_DIR_REQUEST(APP_CONTROL_OP_UNREGISTER),
+                .csid = {0},
+                .data_length = sizeof(application_unregistration_section_t)
+            }
+        }
+    };
+
+    application_unregistration_section_t* pUnregistrationSection = (application_unregistration_section_t*)seg.data;
+    
+    // Send request segment
+    ssize_t rv = send(client_sock, seg.raw, sizeof(application_control_segment_info_t) + sizeof(application_unregistration_section_t), 0);
+
+    printf("send returned with %d\n", rv);
+    printf("errno = %d\n", errno);
+
+    // Receive response segment
+    rv = recv(client_sock, seg.raw, sizeof(application_control_segment_info_t) + sizeof(application_unregistration_section_t), 0);
+
+    printf("recv returned with %d\n", rv);
+    printf("errno = %d\n", errno);
+
+    assert(seg.header.info.op == OP_DIR_RESPONSE(APP_CONTROL_OP_UNREGISTER));
+
+    // Print the result of unregistration
+    printf("Unregistration %s\n", pUnregistrationSection->succeeded ? "succeeded" : "failed");
+
+    printf ("END OF UNREGISTRATION TEST\n");
+
+    return 0;
+}
+
 int initcomm_sock_handler(int client_sock) {
     application_control_segment_t seg = { };
 
@@ -191,6 +230,93 @@ int nop_sock_handler(int client_sock) {
     printf("errno = %d\n", errno);
 
     printf ("END OF NOP TEST\n");
+
+    return 0;
+}
+
+int logs_mode_minimal_sock_handler(int client_sock) {
+    application_control_segment_t seg = {
+        .header = {
+            .info = {
+                .op = OP_DIR_REQUEST(APP_CONTROL_OP_LOGS_MODE_MINIMAL),
+                .csid = {0},
+                .data_length = 0
+            }
+        }
+    };
+
+    ssize_t rv = send(client_sock, seg.header.raw, sizeof(application_control_segment_info_t), 0);
+
+    printf("send for header returned with %d\n", rv);
+    printf("errno = %d\n", errno);
+
+    rv = recv(client_sock, seg.header.raw, sizeof(application_control_segment_info_t), 0);
+
+    printf("(seg.header.info.op is %u)", seg.header.info.op);
+    assert(seg.header.info.op == OP_DIR_RESPONSE(APP_CONTROL_OP_LOGS_MODE_MINIMAL));
+
+    printf("recv for header returned with %d\n", rv);
+    printf("errno = %d\n", errno);
+
+    printf ("END OF LOGS_MODE_MINIMAL TEST\n");
+
+    return 0;
+}
+
+int logs_mode_complete_sock_handler(int client_sock) {
+    application_control_segment_t seg = {
+        .header = {
+            .info = {
+                .op = OP_DIR_REQUEST(APP_CONTROL_OP_LOGS_MODE_COMPLETE),
+                .csid = {0},
+                .data_length = 0
+            }
+        }
+    };
+
+    ssize_t rv = send(client_sock, seg.header.raw, sizeof(application_control_segment_info_t), 0);
+
+    printf("send for header returned with %d\n", rv);
+    printf("errno = %d\n", errno);
+
+    rv = recv(client_sock, seg.header.raw, sizeof(application_control_segment_info_t), 0);
+
+    printf("(seg.header.info.op is %u)", seg.header.info.op);
+    assert(seg.header.info.op == OP_DIR_RESPONSE(APP_CONTROL_OP_LOGS_MODE_COMPLETE));
+
+    printf("recv for header returned with %d\n", rv);
+    printf("errno = %d\n", errno);
+
+    printf ("END OF LOGS_MODE_COMPLETE TEST\n");
+    
+    return 0;
+}
+
+int software_device_reset_sock_handler(int client_sock) {
+    application_control_segment_t seg = {
+        .header = {
+            .info = {
+                .op = OP_DIR_REQUEST(APP_CONTROL_OP_SOFTWARE_DEVICE_RESET),
+                .csid = {0},
+                .data_length = 0
+            }
+        }
+    };
+
+    ssize_t rv = send(client_sock, seg.header.raw, sizeof(application_control_segment_info_t), 0);
+
+    printf("send for header returned with %d\n", rv);
+    printf("errno = %d\n", errno);
+
+    rv = recv(client_sock, seg.header.raw, sizeof(application_control_segment_info_t), 0);
+
+    printf("(seg.header.info.op is %u)", seg.header.info.op);
+    assert(seg.header.info.op == OP_DIR_RESPONSE(APP_CONTROL_OP_SOFTWARE_DEVICE_RESET));
+
+    printf("recv for header returned with %d\n", rv);
+    printf("errno = %d\n", errno);
+
+    printf ("END OF SOFTWARE_DEVICE_RESET TEST\n");
 
     return 0;
 }

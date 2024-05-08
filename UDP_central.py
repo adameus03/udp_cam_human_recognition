@@ -39,7 +39,11 @@ def parse_chunk(data):
     """
     packet_index = int.from_bytes(data[0:4], byteorder='little')
     packet_type = int.from_bytes(data[4:5], byteorder='big')
-    chunk_data = data[5:]
+    # CSID has 16 bytes, ignore it for this script as it is for test purpouses only
+    print("CSID is " + str(data[5:21]))
+    chunk_data = data[21:]
+    #chunk_data = data[5:]
+    
     return packet_index, packet_type, chunk_data
     
 
