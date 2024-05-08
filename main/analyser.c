@@ -56,7 +56,7 @@ void analyser_set_operation_mode(analyser_operation_mode_t mode) {
 void x_camera_process_image(int width, int height, int format, uint8_t** ppuDataBufAddr, size_t len) {
     switch (operation_mode) {
         case ANALYSER_OPERATION_MODE_ANALYSIS:
-            printf("!");
+            //printf("!");
             break;
         case ANALYSER_OPERATION_MODE_UNCONDITIONAL_STREAM:
             x_analyser_perform_action(width, height, format, ppuDataBufAddr, len);

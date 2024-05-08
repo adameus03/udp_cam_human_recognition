@@ -10,6 +10,7 @@
 #include <lwip/netdb.h>
 #include <string.h> /** @tidy Not already included? */
 
+#include "analyser.h"
 #include "misc.h"
 
 //#pragma pack(1) // Force compiler to pack struct members together
@@ -470,7 +471,7 @@ typedef union { // op = APP_CONTROL_OP_GET_DEVICE_INFO
 #define APP_CONTROL_OP_ANALYSE 0x9U //Make the server AI analyse images and decide when to stop video transmission (UDP) with a terminating segment (op = APP_CONTROL_OP_CAM_STOP_ANALYSER_STREAM)
 #define APP_CONTROL_OP_CAM_STOP_ANALYSER_STREAM 0xAU // Terminate camera analyser-triggered UDP video stream as the server AI decided, that the report can be ignored
 #define APP_CONTROL_OP_ENERGY_SAVING_SHUTDOWN_ANALYSER 0xBU
-#define APP_CONTROL_OP_ENERY_SAVING_WAKEUP_ANALYSER 0xCU
+#define APP_CONTROL_OP_ENERGY_SAVING_WAKEUP_ANALYSER 0xCU
 #define APP_CONTROL_OP_ENERGY_SAVING_SHUTDOWN_NETIF 0xDU // Shuts the connection until the analyser reactivates it or the device gets reset for some reason
 #define APP_CONTROL_OP_ENERGY_SAVING_SHUTDOWN_NETIF_SCHED 0xEU // Shutdown the connection for some time (analyser will reactivate it if needed)
 #define APP_CONTROL_OP_ENERGY_SAVING_SCHED_SLEEP 0xFU // Put device to sleep for some time
@@ -595,8 +596,10 @@ void __tcp_rx_task(void *pvParameters) {
         if (!ready) { //[TODO] Should this be done before second recv as well?
             TASKWISE_LOGF(ESP_LOGI, TAG, "tcp_rx_task", "Waiting for the connection to be ready...");
             __semph_operation_assert_success(xSemaphoreTake(__tcp_ready_semph, portMAX_DELAY), "xSemaphoreTake");
+            ESP_LOGI(TAG, "Connection is now ready for __tcp_rx_task.");
             ready = true;
         }
+        ESP_LOGW(TAG, "Waiting for tcp_sock recv in task__tcp_rx_task...");
         ssize_t rv = recv(tcp_sock, seg.header.raw, sizeof(seg.header), 0);
         if (rv == sizeof(seg.header)) {
             if (seg.header.info.data_length > 0) {
@@ -617,7 +620,7 @@ void __tcp_rx_task(void *pvParameters) {
                     }*/
                     __tcp_demux(seg);
                 } else {
-                    if (rv == 0) {
+                    if ((rv == 0) && (errno == 0)) {
                         ESP_LOGE(TAG, "Received empty seg data, when non-empty seg data was expected!");
                     } else if (rv > 0) {
                         if (rv < seg.header.info.data_length) {
@@ -625,16 +628,20 @@ void __tcp_rx_task(void *pvParameters) {
                         } else {
                             ESP_LOGE(TAG, "Unexpectedly received more data bytes than expected seg data length!");
                         }
-                    } else {
+                    }
+                    if (errno != 0) {
                         ESP_LOGE(TAG, "Error while receiving from TCP socket (trying to receive app seg data bytes) [errno = %d]", errno);
                     }
                     reset_tcp_conn();
                     ready = false;
                 }
                 
+            } else {
+                // Segment consists of header only, as there is no segment data
+                __tcp_demux(seg);
             }
         } else {
-            if (rv == 0) {
+            if ((rv == 0) && (errno == 0)) {
                 ESP_LOGE(TAG, "Received empty header!");
             } else if (rv > 0) {
                 if (rv < sizeof(seg.header)) {
@@ -642,7 +649,8 @@ void __tcp_rx_task(void *pvParameters) {
                 } else {
                     ESP_LOGE(TAG, "Unexpectedly received more header bytes than expected header length!");
                 }
-            } else {
+            }
+            if (errno != 0) {
                 ESP_LOGE(TAG, "Error while receiving from TCP socket (trying to receive app seg header bytes) [errno = %d]", errno);
             }
             reset_tcp_conn();
@@ -668,6 +676,7 @@ void __tcp_tx_task(void* pvParameters) {
             if (!ready) {
                 ESP_LOGI(TAG, "tcp tx task waiting for the connection to be ready...");
                 __semph_operation_assert_success(xSemaphoreTake(__tcp_ready_semph, portMAX_DELAY), "xSemaphoreTake");
+                ESP_LOGI(TAG, "Connection is now ready for __tcp_tx_task.");
                 ready = true;
             }
             ssize_t rv = send(tcp_sock, seg.raw, (size_t)tx_seg_len, 0);
@@ -830,6 +839,8 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
                 break;
             } else if (errno == ENOTCONN) { 
                 ESP_LOGE(TAG, "TCP connect returned ENOTCONN, trying to create socket again...");
+                shutdown(tcp_sock, SHUT_RDWR);
+                close(tcp_sock);
                 recreate_socket = 1U;
                 break;
             } else  {
@@ -852,6 +863,7 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
         }
 
         __semph_operation_assert_success(xSemaphoreTake(__tcp_shutdown_semph, portMAX_DELAY), "xSemaphoreTake"); // Wait until sock shutdown requested
+        ESP_LOGI(TAG, "xSemaphoreTake(__tcp_shutdown_semph, portMAX_DELAY) returned.");
 
         comm_set_session_uninitiated();
 
@@ -915,6 +927,7 @@ static void __queue_operation_assert_success(int result, char* pcQueueName, char
 }
 
 static void __buffer_assert_exists_nonzero_byte(char* buf, size_t len, char* errorMessage) {
+    assert(len != 0);
     for (size_t i = 0; i < len; i++) {
         if (buf[i]) {
             return;
@@ -929,15 +942,39 @@ void __tcp_app_send_control_segment(application_control_segment_t* pSegment) {
     __queue_operation_assert_success(result, "__tcp_tx_queue", "xQueueSend", "Application control segment queued to the __tcp_tx_queue queue.");
 }
 
+void tcp_app_send_response(application_control_segment_t* pControlSegment) {
+    ESP_LOGI(TAG, "Responding to server...");
+    pControlSegment->header.info.op = OP_DIR_RESPONSE(pControlSegment->header.info.op);
+    __tcp_app_send_control_segment(pControlSegment);
+}
+
+
+#define TCP_APP_REQUEST_RESPONSE_SUCCESS 0
+#define TCP_APP_REQUEST_RESPONSE_FAILURE -1
 /**
  * Send application request to the server and await the response
 */
-void tcp_app_request(application_control_segment_t* pControlSegment) {
+int tcp_app_request(application_control_segment_t* pControlSegment) {
+    uint8_t requestOp = pControlSegment->header.info.op;
+    if (requestOp != OP_DIR_REQUEST(requestOp)) {
+        ESP_LOGE(TAG, "Trying to send a response segment as a request segment!");
+        return TCP_APP_REQUEST_RESPONSE_FAILURE;
+    }
+    
     ESP_LOGI(TAG, "Sending application control segment to server");
     __tcp_app_send_control_segment(pControlSegment);
     ESP_LOGI(TAG, "Waiting for server response...");
     int result = xQueueReceive(__tcp_res_queue, pControlSegment->raw, portMAX_DELAY);
     __queue_operation_assert_success(result, "__tcp_res_queue", "xQueueReceive", "Received a response from the server.");
+    uint8_t responseOp = pControlSegment->header.info.op;
+    if (responseOp != OP_DIR_RESPONSE(responseOp)) {
+        ESP_LOGE(TAG, "Received a request segment as a response segment!");
+        return TCP_APP_REQUEST_RESPONSE_FAILURE;
+    } else if (OP_DIR_REQUEST(responseOp) != requestOp) {
+        ESP_LOGE(TAG, "Received a response segment with an unexpected op code! (Expected: %u, Received: %u)", requestOp, responseOp);
+        return TCP_APP_REQUEST_RESPONSE_FAILURE;
+    }
+    return TCP_APP_REQUEST_RESPONSE_SUCCESS;
 }
 
 void tcp_app_handle_registration(char* pcUid_in, char** ppcCid_out, char** ppcCkey_in, SemaphoreHandle_t semphSync) {
@@ -961,10 +998,14 @@ void tcp_app_handle_registration(char* pcUid_in, char** ppcCid_out, char** ppcCk
     application_control_segment_set_data (&seg, registrationSection.raw);
     
     ESP_LOGI(TAG, "Requesting registration...");
-    tcp_app_request(&seg); // passes UID, mac to server ; obtains CID from server
+    if(TCP_APP_REQUEST_RESPONSE_SUCCESS != tcp_app_request(&seg)) { // passes UID, mac to server ; obtains CID from server
+        ESP_LOGE(TAG, "Failed to register with the server!");
+        exit(EXIT_FAILURE);
+    }
 
     char* cid = ((application_registration_section_t*)seg.data)->cid;
     __buffer_assert_exists_nonzero_byte(cid, CID_LENGTH, "Server was expected to generate a valid CID, but they seem to have failed");
+    memcpy(*ppcCid_out, cid, CID_LENGTH);
 
     ESP_LOGI(TAG, "End of first stage of registration");//expect specific log after this
     ESP_LOGW(TAG, "semphSync = %p", semphSync);
@@ -977,8 +1018,11 @@ void tcp_app_handle_registration(char* pcUid_in, char** ppcCid_out, char** ppcCk
     seg.header.info.op = OP_DIR_REQUEST(seg.header.info.op);
     application_registration_section_set_ckey ((application_registration_section_t*)seg.data, *ppcCkey_in);
     
-    tcp_app_request(&seg); // passes CKEY to server ; obtains confirmation (any valid response) from server
-    
+    if (TCP_APP_REQUEST_RESPONSE_SUCCESS != tcp_app_request(&seg)) { // passes CKEY to server ; obtains confirmation (any valid response) from server
+        ESP_LOGE(TAG, "Failed to complete registration with the server!");
+        exit(EXIT_FAILURE);
+    }
+
     ESP_LOGI(TAG, "Calling final (xSemaphoreGive(semphSync), to indicate end of registration-related communications with server");
     __semph_operation_assert_success(xSemaphoreGive(semphSync), "xSemaphoreGive"); // indicate end of registration communications
 }
@@ -1000,8 +1044,11 @@ void tcp_app_init_comm(char** ppCsid) {
     application_control_segment_set_data(&seg, initcommSection.raw);
 
     ESP_LOGI(TAG, "Requesting initcomm...");
-    tcp_app_request(&seg); // passes CID, CKEY to server ; obtains CSID from server (if auth succeeded)
-    
+    if (TCP_APP_REQUEST_RESPONSE_SUCCESS != tcp_app_request(&seg)) { // passes CID, CKEY to server ; obtains CSID from server (if auth succeeded)
+        ESP_LOGE(TAG, "Failed to initiate communications with the server!");
+        exit(EXIT_FAILURE);
+    }
+
     char* csid = seg.header.info.csid;
     __buffer_assert_exists_nonzero_byte(csid, COMM_CSID_LENGTH, "SERVER AUTHENTICATION FAILED!");
 
@@ -1023,7 +1070,8 @@ static void tcp_app_handle_unregistration_request(application_control_segment_t*
     if (err == ESP_OK) {
         unregistrationSection.succeeded = 1U;
         application_control_segment_set_data(pSeg, unregistrationSection.raw);
-        __tcp_app_send_control_segment(pSeg);
+        
+        tcp_app_send_response(pSeg);
         ESP_LOGI(TAG, "Waiting for queued tx segments");
         await_tx_queue_empty();
 
@@ -1040,6 +1088,25 @@ static void tcp_app_handle_unregistration_request(application_control_segment_t*
     }
 }
 
+static void tcp_app_handle_nop_request(application_control_segment_t* pSeg) {
+    ESP_LOGI(TAG, "NOP requested by the server.");
+    tcp_app_send_response(pSeg); // Notify the server that we are still alive
+}
+
+static void tcp_app_handle_start_unconditional_stream_request(application_control_segment_t* pSeg) {
+    //ESP_LOGE(TAG, "Not implemented"); assert(0); // [TODO] <<<<<<
+    ESP_LOGI(TAG, "Unconditional stream requested by the server."); // [TODO] should the server or mobile app analyse it then?
+    analyser_set_operation_mode(ANALYSER_OPERATION_MODE_UNCONDITIONAL_STREAM);
+    tcp_app_send_response(pSeg);
+}
+
+static void tcp_app_handle_stop_unconditional_stream_request(application_control_segment_t* pSeg) {
+    ESP_LOGI(TAG, "Unconditional stream discontinued by the server,");
+    analyser_set_operation_mode(ANALYSER_OPERATION_MODE_ANALYSIS);
+    //vTaskDelay(500 / portTICK_PERIOD_MS);
+    tcp_app_send_response(pSeg);
+}
+
 /**
  * @brief Task handler for processing incoming requests
 */
@@ -1052,11 +1119,20 @@ void tcp_app_incoming_request_handler_task(void* pvParameters) {
         int result = xQueueReceive(__tcp_req_queue, seg.raw, portMAX_DELAY);
         __queue_operation_assert_success(result, "__tcp_req_queue", "xQueueReceive", "Received a request from the server.");
 
+        ESP_LOGW(TAG, "RECEIVED SERVER REQUEST");
         switch (seg.header.info.op) {
+            case APP_CONTROL_OP_NOP:
+                tcp_app_handle_nop_request(&seg);
+                break;
             case APP_CONTROL_OP_UNREGISTER:
                 tcp_app_handle_unregistration_request(&seg);
                 break;
-            
+            case APP_CONTROL_OP_CAM_START_UNCONDITIONAL_STREAM:
+                tcp_app_handle_start_unconditional_stream_request(&seg);
+                break;
+            case APP_CONTROL_OP_CAM_STOP_UNCONDITIONAL_STREAM:
+                tcp_app_handle_stop_unconditional_stream_request(&seg);
+                break;
             default:
                 ESP_LOGE(TAG, "Detected unknown or unhandled request! (op = %u)", seg.header.info.op);
                 break;

@@ -42,7 +42,9 @@
         "ble_uuid.h": "c",
         "freertos.h": "c",
         "esp_transport.h": "c",
-        "server_communications.h": "c"
+        "server_communications.h": "c",
+        "misc.h": "c",
+        "def.h": "c"
     },
     "idf.flashType": "UART"
 }

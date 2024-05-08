@@ -65,7 +65,7 @@ uint32_t app_registration_server_communication_callback(registration_data_t* pRe
     };
 
     ESP_LOGI(TAG, "Creating task registrationServerCommmunication_callback");
-    if (pdPASS != xTaskCreate( __registrationServerCommmunicationCallback_task, "registrationServerCommmunication_callback", 2560, &params, 1, &registrationServerCommmunication_callback_task_handle )) {
+    if (pdPASS != xTaskCreate( __registrationServerCommmunicationCallback_task, "registrationServerCommmunication_callback", /*2560*/3072, &params, 1, &registrationServerCommmunication_callback_task_handle )) {
         ESP_LOGE(TAG, "Failed to create the registrationServerCommmunication_callback task.");
         exit(EXIT_FAILURE);
     }
