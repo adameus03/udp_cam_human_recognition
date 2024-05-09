@@ -873,7 +873,7 @@ void tcp_connection_manage_task(void* pvParameters) { // [TODO] Keepalive ?
             /*char* pCsid = __comm_csid;
             tcp_app_init_comm(&pCsid);*/
             ESP_LOGI(TAG, "Creating task tcp_app_initcomm"); //
-            if (pdPASS != xTaskCreate( tcp_app_initcomm_task, "tcp_app_initcomm", 2048, NULL, 1, &tcp_app_initcomm_task_handle )) {
+            if (pdPASS != xTaskCreate( tcp_app_initcomm_task, "tcp_app_initcomm", /*2048*/3072, NULL, 1, &tcp_app_initcomm_task_handle )) {
                 ESP_LOGE(TAG, "Failed to create the tcp_app_initcomm task.");
                 exit(EXIT_FAILURE);
             }

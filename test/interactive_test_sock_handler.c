@@ -58,6 +58,10 @@ int client_sock_handler(int client_sock) {
             if (0 != energy_saving_wakeup_analyser_sock_handler(client_sock)) {
                 return 1;
             }
+        } else if (0 == strcmp(command, "dev reset\n")) {
+            if (0 != software_device_reset_sock_handler(client_sock)) {
+                return 1;
+            }
         } else if (0 == strcmp(command, "exit\n")) { // Not really a server command, but enables user to gracefully exit the program
             break;
         } else {
