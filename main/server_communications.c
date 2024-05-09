@@ -16,7 +16,7 @@
 //#pragma pack(1) // Force compiler to pack struct members together
 
 static const char * TAG = "server_communications";
-#define HOST_IP_ADDR /*"192.168.1.15"*//*"192.168.173.32"*//*"192.168.116.32"*//*"192.168.43.32"*//**//*"192.168.34.32"*//*"192.168.123.32"*/"192.168.1.15"
+#define HOST_IP_ADDR /*"192.168.1.15"*//*"192.168.173.32"*//*"192.168.116.32"*//*"192.168.43.32"*//**//*"192.168.34.32"*//*"192.168.123.32"*//*"192.168.1.15"*/"192.168.92.32"
 #define UDP_PORT 3333
 #define TCP_PORT 3334
 
@@ -106,7 +106,7 @@ typedef struct {
         struct {
             uint32_t pkt_idx; // Chunk index (assigns chunk index to IP packet)
             jfif_chunk_type_t chunk_type; // JFIF_INTERMEDIATE_CHUNK, JFIF_FIRST_CHUNK, JFIF_LAST_CHUNK or JFIF_ONLY_CHUNK
-            //char csid[COMM_CSID_LENGTH];
+            char csid[COMM_CSID_LENGTH]; //!
         };
         uint8_t raw[APP_DESC_SEGMENT_SIZE];
     } __attribute__((packed)) desc;
