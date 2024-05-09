@@ -1160,15 +1160,25 @@ static void tcp_app_handle_software_device_reset_request(application_control_seg
     esp_restart();
 }
 
+static void tcp_app_handle_energy_saving_shutdown_analyser(application_control_segment_t* pSeg) {
+    ESP_LOGI(TAG, "Analyser shutdown requested by the server,");
+    analyser_shutdown();
+    tcp_app_send_response(pSeg);
+}
+
+static void tcp_app_handle_energy_saving_wakeup_analyser(application_control_segment_t* pSeg) {
+    ESP_LOGI(TAG, "Analyser wakeup requested by the server,");
+    analyser_wakeup();
+    tcp_app_send_response(pSeg);
+}
+
 /**
  * @brief Task handler for processing incoming requests
 */
 void tcp_app_incoming_request_handler_task(void* pvParameters) {
     application_control_segment_t seg = {};
     while (1) {
-        /*ESP_LOGE(TAG, "tcp_app_incoming_request_handler_task is not implemented!");
-        vTaskDelay(1000 / portTICK_PERIOD_MS);*/
-
+        
         int result = xQueueReceive(__tcp_req_queue, seg.raw, portMAX_DELAY);
         __queue_operation_assert_success(result, "__tcp_req_queue", "xQueueReceive", "Received a request from the server.");
 
@@ -1194,6 +1204,12 @@ void tcp_app_incoming_request_handler_task(void* pvParameters) {
                 break;
             case APP_CONTROL_OP_SOFTWARE_DEVICE_RESET:
                 tcp_app_handle_software_device_reset_request(&seg);
+                break;
+            case APP_CONTROL_OP_ENERGY_SAVING_SHUTDOWN_ANALYSER:
+                tcp_app_handle_energy_saving_shutdown_analyser(&seg);
+                break;
+            case APP_CONTROL_OP_ENERGY_SAVING_WAKEUP_ANALYSER:
+                tcp_app_handle_energy_saving_wakeup_analyser(&seg);
                 break;
             default:
                 ESP_LOGE(TAG, "Detected unknown or unhandled request! (op = %u)", seg.header.info.op);

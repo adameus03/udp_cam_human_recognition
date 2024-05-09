@@ -320,3 +320,61 @@ int software_device_reset_sock_handler(int client_sock) {
 
     return 0;
 }
+
+int energy_saving_shutdown_analyser_sock_handler(int client_sock) {
+    application_control_segment_t seg = {
+        .header = {
+            .info = {
+                .op = OP_DIR_REQUEST(APP_CONTROL_OP_ENERGY_SAVING_SHUTDOWN_ANALYSER),
+                .csid = {0},
+                .data_length = 0
+            }
+        }
+    };
+
+    ssize_t rv = send(client_sock, seg.header.raw, sizeof(application_control_segment_info_t), 0);
+
+    printf("send for header returned with %d\n", rv);
+    printf("errno = %d\n", errno);
+
+    rv = recv(client_sock, seg.header.raw, sizeof(application_control_segment_info_t), 0);
+
+    printf("(seg.header.info.op is %u)", seg.header.info.op);
+    assert(seg.header.info.op == OP_DIR_RESPONSE(APP_CONTROL_OP_ENERGY_SAVING_SHUTDOWN_ANALYSER));
+
+    printf("recv for header returned with %d\n", rv);
+    printf("errno = %d\n", errno);
+
+    printf ("END OF ENERGY_SAVING_SHUTDOWN_ANALYSER TEST\n");
+
+    return 0;
+}
+
+int energy_saving_wakeup_analyser_sock_handler(int client_sock) {
+    application_control_segment_t seg = {
+        .header = {
+            .info = {
+                .op = OP_DIR_REQUEST(APP_CONTROL_OP_ENERY_SAVING_WAKEUP_ANALYSER),
+                .csid = {0},
+                .data_length = 0
+            }
+        }
+    };
+
+    ssize_t rv = send(client_sock, seg.header.raw, sizeof(application_control_segment_info_t), 0);
+
+    printf("send for header returned with %d\n", rv);
+    printf("errno = %d\n", errno);
+
+    rv = recv(client_sock, seg.header.raw, sizeof(application_control_segment_info_t), 0);
+
+    printf("(seg.header.info.op is %u)", seg.header.info.op);
+    assert(seg.header.info.op == OP_DIR_RESPONSE(APP_CONTROL_OP_ENERY_SAVING_WAKEUP_ANALYSER));
+
+    printf("recv for header returned with %d\n", rv);
+    printf("errno = %d\n", errno);
+
+    printf ("END OF ENERGY_SAVING_WAKEUP_ANALYSER TEST\n");
+
+    return 0;
+}

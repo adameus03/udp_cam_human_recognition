@@ -27,7 +27,7 @@ registration_network_state_t app_registration_network_connectivity_check_handler
             exit(EXIT_FAILURE); // [TODO] Does this make esp32 reset or not?
         }
         ESP_LOGI(TAG, "Creating task 'tcp_app_incoming_request_handler'");
-        if (pdPASS != xTaskCreate( tcp_app_incoming_request_handler_task, "tcp_app_incoming_request_handler", 2048, NULL, 1, &tcp_app_incoming_request_handler_task_handle)) {
+        if (pdPASS != xTaskCreate( tcp_app_incoming_request_handler_task, "tcp_app_incoming_request_handler", 2304, NULL, 1, &tcp_app_incoming_request_handler_task_handle)) {
             ESP_LOGE(TAG, "Failed to create the tcp_app_incoming_request_handler task.");
             exit(EXIT_FAILURE);
         }

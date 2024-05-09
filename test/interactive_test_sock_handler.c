@@ -50,6 +50,14 @@ int client_sock_handler(int client_sock) {
             if (0 != logs_mode_complete_sock_handler(client_sock)) {
                 return 1;
             }
+        } else if (0 == strcmp(command, "ana shut\n")) {
+            if (0 != energy_saving_shutdown_analyser_sock_handler(client_sock)) {
+                return 1;
+            }
+        } else if (0 == strcmp(command, "ana wake\n")) {
+            if (0 != energy_saving_wakeup_analyser_sock_handler(client_sock)) {
+                return 1;
+            }
         } else if (0 == strcmp(command, "exit\n")) { // Not really a server command, but enables user to gracefully exit the program
             break;
         } else {

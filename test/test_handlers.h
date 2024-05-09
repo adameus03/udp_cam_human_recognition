@@ -9,3 +9,6 @@ int nop_sock_handler(int client_sock);
 
 int logs_mode_minimal_sock_handler(int client_sock);
 int logs_mode_complete_sock_handler(int client_sock);
+
+int energy_saving_shutdown_analyser_sock_handler(int client_sock);
+int energy_saving_wakeup_analyser_sock_handler(int client_sock);

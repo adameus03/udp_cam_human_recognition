@@ -7,6 +7,20 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 import os
+import time
+import math
+
+#import pysine
+from pysinewave import SineWave
+
+# start sinewave
+sinewave = SineWave(pitch_per_second = 100)
+sinewave.set_frequency(0)
+sinewave.play()
+
+fps = 0
+last_time = 0
+frame_counter = 0
 
 
 UDP_IP = "0.0.0.0"
@@ -63,6 +77,18 @@ class Visualizer:
         self.IMAGE_RENDER_DELAY_MS = IMAGE_RENDER_DELAY_MS
 
     def image_update(self, jfif_data):
+        global fps
+        global last_time
+        global frame_counter
+        
+        # handle fps calculation
+        frame_counter += 1
+        current_time = time.time()
+        if current_time - last_time >= 1:
+            fps = frame_counter
+            frame_counter = 0
+            last_time = current_time
+            
         # store raw jfif_data bytes to a file
         #with open('frame_CENTRAL_raw.jpg', 'wb') as f:
         #    f.write(jfif_data)
@@ -85,13 +111,29 @@ class Visualizer:
                 fig = plt.figure()
                 self.axesImage = plt.imshow(frame, aspect='auto')
                 self.axesImageSet = True
+                # print fps as title
+                plt.title('FPS: ' + str(fps))
+
+                #pysine.sine(frequency=440.0, duration=1.0) 
+                sinewave.set_frequency(100 * fps)
+                sinewave.play()
+
                 plt.show()
                 plt.pause(self.IMAGE_RENDER_DELAY_MS / 1000.0)
+                sinewave.stop()
                 
             else:
                 self.axesImage.set_data(frame)
+                # print fps as title
+                plt.title('FPS: ' + str(fps))
+
+                #pysine.sine(frequency=440.0, duration=1.0) 
+                sinewave.set_frequency(100 * fps)
+                sinewave.play()
+
                 plt.draw()
                 plt.pause(self.IMAGE_RENDER_DELAY_MS / 1000.0) # pause a bit so that plots are updated
+                sinewave.stop()
         except Exception as e:
             print(e)
 
@@ -107,6 +149,24 @@ def named_pipe_send(pname="/tmp/f8a22310975600b1", data=b''):
         f.write(data)
 
     print("[Visualizer] END NAMED_PIPE_SEND")
+
+def run_tone_freq_updater():
+    global fps
+    global last_time
+    global frame_counter
+    global sinewave
+
+    sinewave = SineWave(pitch_per_second = 1000)
+    sinewave.set_frequency(0)
+    sinewave.play()
+    while True:
+        sinewave.set_frequency(300 * math.log(fps + 1))
+        # reset counter to 0 if needed
+        current_time = time.time()
+        if current_time - last_time >= 2.0:
+            fps = 0
+            frame_counter = 0
+        time.sleep(0.1)
 
 #If the reassembler fills the queue faster than the visualizer can consume it, the reassembler could block until the visualizer consumes some of the queue.
 #But we don't want that, because the reassembler should be able to keep up with the incoming data.
@@ -266,6 +326,7 @@ def listen_udp():
 
 listener_thread = threading.Thread(target=listen_udp)
 reassembler_thread = threading.Thread(target=run_reassembler, args=(10,))
+tone_updater_thread = threading.Thread(target=run_tone_freq_updater)
 #visualizer_thread = threading.Thread(target=run_visualizer)
 
 #visualizer_thread.start()
@@ -274,6 +335,9 @@ reassembler_thread.start()
 print("Reassembler thread started")
 listener_thread.start()
 print("Listener thread started")
+
+#tone_updater_thread.start()
+#print("Tone updater thread started")
 
 run_visualizer()
 
@@ -286,3 +350,7 @@ reassembler_thread.join()
 print("Reassembler thread finished")
 #visualizer_thread.join()
 #print("Visualizer thread finished")
+
+
+
+
