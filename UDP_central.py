@@ -11,12 +11,12 @@ import time
 import math
 
 #import pysine
-from pysinewave import SineWave
+#from pysinewave import SineWave
 
 # start sinewave
-sinewave = SineWave(pitch_per_second = 100)
-sinewave.set_frequency(0)
-sinewave.play()
+#sinewave = SineWave(pitch_per_second = 100)
+#sinewave.set_frequency(0)
+#sinewave.play()
 
 fps = 0
 last_time = 0
@@ -24,7 +24,8 @@ frame_counter = 0
 
 
 UDP_IP = "0.0.0.0"
-UDP_PORT = 3333
+#UDP_PORT = 3333
+UDP_PORT = 8090
 #MAX_UDP_DATA_SIZE = 65500
 MAX_UDP_DATA_SIZE = 32750
 
@@ -115,12 +116,12 @@ class Visualizer:
                 plt.title('FPS: ' + str(fps))
 
                 #pysine.sine(frequency=440.0, duration=1.0) 
-                sinewave.set_frequency(100 * fps)
-                sinewave.play()
+                ##sinewave.set_frequency(100 * fps)
+                ##sinewave.play()
 
                 plt.show()
                 plt.pause(self.IMAGE_RENDER_DELAY_MS / 1000.0)
-                sinewave.stop()
+                ##sinewave.stop()
                 
             else:
                 self.axesImage.set_data(frame)
@@ -128,12 +129,12 @@ class Visualizer:
                 plt.title('FPS: ' + str(fps))
 
                 #pysine.sine(frequency=440.0, duration=1.0) 
-                sinewave.set_frequency(100 * fps)
-                sinewave.play()
+                ##sinewave.set_frequency(100 * fps)
+                ##sinewave.play()
 
                 plt.draw()
                 plt.pause(self.IMAGE_RENDER_DELAY_MS / 1000.0) # pause a bit so that plots are updated
-                sinewave.stop()
+                ##sinewave.stop()
         except Exception as e:
             print(e)
 
@@ -154,13 +155,13 @@ def run_tone_freq_updater():
     global fps
     global last_time
     global frame_counter
-    global sinewave
+    ##global sinewave
 
-    sinewave = SineWave(pitch_per_second = 1000)
-    sinewave.set_frequency(0)
-    sinewave.play()
+    ##sinewave = SineWave(pitch_per_second = 1000)
+    ##sinewave.set_frequency(0)
+    ##sinewave.play()
     while True:
-        sinewave.set_frequency(300 * math.log(fps + 1))
+        ##sinewave.set_frequency(300 * math.log(fps + 1))
         # reset counter to 0 if needed
         current_time = time.time()
         if current_time - last_time >= 2.0:
@@ -326,7 +327,7 @@ def listen_udp():
 
 listener_thread = threading.Thread(target=listen_udp)
 reassembler_thread = threading.Thread(target=run_reassembler, args=(10,))
-tone_updater_thread = threading.Thread(target=run_tone_freq_updater)
+#tone_updater_thread = threading.Thread(target=run_tone_freq_updater)
 #visualizer_thread = threading.Thread(target=run_visualizer)
 
 #visualizer_thread.start()

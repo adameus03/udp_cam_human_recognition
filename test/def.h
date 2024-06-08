@@ -9,7 +9,7 @@
 #include <assert.h>
 
 #define SERV_IP_ADDR "0.0.0.0"
-#define TCP_PORT 3334
+#define TCP_PORT 8090
 
 extern int client_sock_handler(int client_sock);
 static inline int client_sock_setup(int client_sock) {
