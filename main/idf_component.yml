@@ -1,5 +1,6 @@
 ## IDF Component Manager Manifest File
 dependencies:
+  espressif/esp-tflite-micro: "*"
   espressif/esp32-camera: "*"
   ## Required IDF version
   idf:

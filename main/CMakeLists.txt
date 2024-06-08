@@ -1,4 +1,4 @@
-idf_component_register(SRCS "misc.c" "sau_heap_debug.c" "wifi_connect.c" "camera.c" "analyser.c" "server_communications.c" "camau_controller.c" "registration.c" "main.c";
+idf_component_register(SRCS "tl_infer_agent.cc" "tl_model.cc" "misc.c" "sau_heap_debug.c" "wifi_connect.c" "camera.c" "analyser.c" "server_communications.c" "camau_controller.c" "registration.c" "main.c";
                     INCLUDE_DIRS ".")
 
 # Fortify source code
