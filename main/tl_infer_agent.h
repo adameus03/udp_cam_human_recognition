@@ -1,5 +1,13 @@
+#include <stdint.h>
+#include <stdlib.h>
+
 typedef struct {
-    // [TODO] Add fields
+    /* JFIF data buffer */
+    uint8_t* puData;
+    /* Length of the JFIF data buffer */
+    size_t len;
+    size_t imageWidth;
+    size_t imageHeight;
 } tl_infer_agent_input_t;
 
 typedef enum {
@@ -12,7 +20,9 @@ extern "C" {
 #endif
 void tl_infer_agent_init();
 
-tl_infer_agent_output_t tl_infer_agent_perform_action(tl_infer_agent_input_t* pInput);
+void tl_infer_agent_feed_input(tl_infer_agent_input_t* pInput);
+void tl_infer_agent_perform_inference();
+tl_infer_agent_output_t tl_infer_agent_get_output();
 
 #ifdef __cplusplus
 }

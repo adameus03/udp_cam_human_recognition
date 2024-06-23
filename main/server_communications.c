@@ -16,11 +16,12 @@
 //#pragma pack(1) // Force compiler to pack struct members together
 
 static const char * TAG = "server_communications";
-#define HOST_IP_ADDR /*"192.168.1.15"*//*"192.168.195.32"*/"192.168.83.32"/*"192.168.173.32"*//*"192.168.116.32"*//*"192.168.43.32"*//**//*"192.168.34.32"*//*"192.168.123.32"*//*"192.168.1.15"*//*"192.168.92.32"*/
-//#define UDP_PORT 3333
+#define HOST_IP_ADDR "192.168.1.15"/*"192.168.195.32"*//*"192.168.83.32"*//*"192.168.173.32"*//*"192.168.116.32"*//*"192.168.43.32"*//**//*"192.168.34.32"*//*"192.168.123.32"*//*"192.168.1.15"*//*"192.168.92.32"*/
+#define UDP_PORT 3333
+#define TCP_PORT 3334
 //#define TCP_PORT 3334
-#define UDP_PORT 8090
-#define TCP_PORT 8090
+//#define UDP_PORT 8090
+//#define TCP_PORT 8090
 
 
 static char __comm_csid[COMM_CSID_LENGTH];
